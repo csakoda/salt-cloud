@@ -70,11 +70,13 @@ import uuid
 import pprint
 import logging
 import yaml
+from time import sleep
 
 # Import libs for talking to the EC2 API
 import hmac
 import hashlib
 import binascii
+import base64
 import datetime
 import urllib
 import urllib2
@@ -91,7 +93,6 @@ from saltcloud.exceptions import (
     SaltCloudExecutionTimeout,
     SaltCloudExecutionFailure
 )
-
 
 # Get logging started
 log = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ def _xml_to_dict(xmltree):
 
 
 def query(params=None, setname=None, requesturl=None, location=None,
-          return_url=False, return_root=False):
+          return_url=False, return_root=False, endpoint_provider='ec2'):
 
     provider = get_configured_provider()
     service_url = provider.get('service_url', 'amazonaws.com')
@@ -235,16 +236,26 @@ def query(params=None, setname=None, requesturl=None, location=None,
     if not requesturl:
         method = 'GET'
 
-        endpoint = provider.get(
-            'endpoint',
-            'ec2.{0}.{1}'.format(location, service_url)
-        )
+        if endpoint_provider == 'ec2':
+            endpoint = provider.get(
+                'endpoint',
+                'ec2.{0}.{1}'.format(location, service_url)
+            )
+        elif endpoint_provider == 'elb':
+            endpoint = provider.get(
+                'elb_endpoint',
+                'elasticloadbalancing.amazonaws.com'
+            )            
+        else:
+            log.error(
+                'Unknown endpoint_provider: ' + endpoint_provider
+            )
 
         params['AWSAccessKeyId'] = provider['id']
         params['SignatureVersion'] = '2'
         params['SignatureMethod'] = 'HmacSHA256'
         params['Timestamp'] = '{0}'.format(timestamp)
-        params['Version'] = '2013-02-01'
+        params['Version'] = '2012-06-01'
         keys = sorted(params.keys())
         values = map(params.get, keys)
         querystring = urllib.urlencode(list(zip(keys, values)))
@@ -718,6 +729,11 @@ def create(vm_=None, call=None):
             set_delvol_on_destroy
         ).lower()
 
+    ex_userdata = userdata(vm_)
+    if ex_userdata:
+        log.info('Applying user data script')
+        params['UserData'] = base64.b64encode(ex_userdata)
+
     try:
         data = query(params, 'instancesSet', location=location)
         if 'error' in data:
@@ -821,80 +837,88 @@ def create(vm_=None, call=None):
         ip_address = data[0]['instancesSet']['item']['ipAddress']
         log.info('Salt node data. Public_ip: {0}'.format(ip_address))
 
-    display_ssh_output = config.get_config_value(
-        'display_ssh_output', vm_, __opts__, default=True
-    )
-
-    if saltcloud.utils.wait_for_ssh(ip_address):
-        for user in usernames:
-            if saltcloud.utils.wait_for_passwd(
-                host=ip_address,
-                username=user,
-                ssh_timeout=60,
-                key_filename=key_filename,
-                display_ssh_output=display_ssh_output
-            ):
-                username = user
-                break
-        else:
-            raise SaltCloudSystemExit(
-                'Failed to authenticate against remote ssh'
-            )
-
     ret = {}
-    if config.get_config_value('deploy', vm_, __opts__) is True:
-        deploy_script = script(vm_)
-        deploy_kwargs = {
-            'host': ip_address,
-            'username': username,
-            'key_filename': key_filename,
-            'deploy_command': '/tmp/deploy.sh',
-            'tty': True,
-            'script': deploy_script,
-            'name': vm_['name'],
-            'sudo': config.get_config_value(
-                'sudo', vm_, __opts__, default=(username != 'root')
-            ),
-            'start_action': __opts__['start_action'],
-            'parallel': __opts__['parallel'],
-            'conf_file': __opts__['conf_file'],
-            'sock_dir': __opts__['sock_dir'],
-            'minion_pem': vm_['priv_key'],
-            'minion_pub': vm_['pub_key'],
-            'keep_tmp': __opts__['keep_tmp'],
-            'preseed_minion_keys': vm_.get('preseed_minion_keys', None),
-            'display_ssh_output': display_ssh_output,
-            'minion_conf': saltcloud.utils.minion_config(__opts__, vm_),
-            'script_args': config.get_config_value(
-                'script_args', vm_, __opts__
-            ),
-            'script_env': config.get_config_value(
-                'script_env', vm_, __opts__
-            )
-        }
-
-        # Deploy salt-master files, if necessary
-        if config.get_config_value('make_master', vm_, __opts__) is True:
-            deploy_kwargs['make_master'] = True
-            deploy_kwargs['master_pub'] = vm_['master_pub']
-            deploy_kwargs['master_pem'] = vm_['master_pem']
-            master_conf = saltcloud.utils.master_config(__opts__, vm_)
-            deploy_kwargs['master_conf'] = master_conf
-
-            if master_conf.get('syndic_master', None):
-                deploy_kwargs['make_syndic'] = True
-
-        deploy_kwargs['make_minion'] = config.get_config_value(
-            'make_minion', vm_, __opts__, default=True
+    if not ex_userdata:
+        display_ssh_output = config.get_config_value(
+            'display_ssh_output', vm_, __opts__, default=True
         )
 
-        ret['deploy_kwargs'] = deploy_kwargs
-        deployed = saltcloud.utils.deploy_script(**deploy_kwargs)
-        if deployed:
-            log.info('Salt installed on {name}'.format(**vm_))
-        else:
-            log.error('Failed to start Salt on Cloud VM {name}'.format(**vm_))
+        if saltcloud.utils.wait_for_ssh(ip_address):
+            for user in usernames:
+                if saltcloud.utils.wait_for_passwd(
+                    host=ip_address,
+                    username=user,
+                    ssh_timeout=60,
+                    key_filename=key_filename,
+                    display_ssh_output=display_ssh_output
+                ):
+                    username = user
+                    break
+            else:
+                raise SaltCloudSystemExit(
+                    'Failed to authenticate against remote ssh'
+                )
 
+        if config.get_config_value('deploy', vm_, __opts__) is True:
+            deploy_script = script(vm_)
+            deploy_kwargs = {
+                'host': ip_address,
+                'username': username,
+                'key_filename': key_filename,
+                'deploy_command': '/tmp/deploy.sh',
+                'tty': True,
+                'script': deploy_script,
+                'name': vm_['name'],
+                'sudo': config.get_config_value(
+                    'sudo', vm_, __opts__, default=(username != 'root')
+                ),
+                'start_action': __opts__['start_action'],
+                'parallel': __opts__['parallel'],
+                'conf_file': __opts__['conf_file'],
+                'sock_dir': __opts__['sock_dir'],
+                'minion_pem': vm_['priv_key'],
+                'minion_pub': vm_['pub_key'],
+                'keep_tmp': __opts__['keep_tmp'],
+                'preseed_minion_keys': vm_.get('preseed_minion_keys', None),
+                'display_ssh_output': display_ssh_output,
+                'minion_conf': saltcloud.utils.minion_config(__opts__, vm_),
+                'script_args': config.get_config_value(
+                    'script_args', vm_, __opts__
+                ),
+                'script_env': config.get_config_value(
+                    'script_env', vm_, __opts__
+                )
+            }
+
+            # Deploy salt-master files, if necessary
+            if config.get_config_value('make_master', vm_, __opts__) is True:
+                deploy_kwargs['make_master'] = True
+                deploy_kwargs['master_pub'] = vm_['master_pub']
+                deploy_kwargs['master_pem'] = vm_['master_pem']
+                master_conf = saltcloud.utils.master_config(__opts__, vm_)
+                deploy_kwargs['master_conf'] = master_conf
+
+                if master_conf.get('syndic_master', None):
+                    deploy_kwargs['make_syndic'] = True
+
+            deploy_kwargs['make_minion'] = config.get_config_value(
+                'make_minion', vm_, __opts__, default=True
+            )
+
+            ret['deploy_kwargs'] = deploy_kwargs
+            deployed = saltcloud.utils.deploy_script(**deploy_kwargs)
+            if deployed:
+                log.info('Salt installed on {name}'.format(**vm_))
+            else:
+                log.error('Failed to start Salt on Cloud VM {name}'.format(**vm_))
+
+    else:
+        password = saltcloud.utils.wait_for_windows_passwd(vm_)
+        if password:
+            log.info('Got Administrator password: {0}'.format(password))
+        else:
+            log.info('No Administrator password could be found.  Check back later with \'salt-cloud -a get_password {0}\''.format(vm_['name']))
+ 
     log.info('Created Cloud VM {0[name]!r}'.format(vm_))
     log.debug(
         '{0[name]!r} VM creation details:\n{1}'.format(
@@ -970,13 +994,41 @@ def create_attach_volumes(name, kwargs, call=None):
                 if 'volumeId' in item:
                     volume_dict['volume_id'] = item['volumeId']
 
-        attach = attach_volume(
-            name,
-            {'volume_id': volume_dict['volume_id'], 'device': volume['device']},
-            instance_id=kwargs['instance_id'],
-            call='action'
-        )
-        if attach:
+        # TODO: this might be broken post merge
+        attempts = 5
+        while attempts > 0:
+            data = attach_volume(
+                name,
+                {'volume_id': volume_dict['volume_id'], 'device': volume['device']},
+                instance_id=kwargs['instance_id'],
+                call='action'
+                )
+            log.debug('The query returned: {0}'.format(data))
+
+            if isinstance(data, dict) and 'error' in data:
+                log.warn(
+                    'There was an error in the query. {0} attempts '
+                    'remaining: {1}'.format(
+                        attempts, data['error']
+                    )
+                )
+                attempts -= 1
+		sleep(1)
+                continue
+
+            if isinstance(data, list) and not data:
+                log.warn(
+                    'There was an error in the query. {0} attempts '
+                    'remaining: {1}'.format(
+                        attempts, data['error']
+                    )
+                )
+                attempts -= 1
+		sleep(1)
+                continue
+            
+            # No errors, volume successfully attached
+
             msg = (
                 '{0} attached to {1} (aka {2}) as device {3}'.format(
                     volume_dict['volume_id'], kwargs['instance_id'], name, volume['device']
@@ -984,6 +1036,12 @@ def create_attach_volumes(name, kwargs, call=None):
             )
             log.info(msg)
             ret.append(msg)
+            break
+        else:
+            raise SaltCloudSystemExit(
+                'An error occurred while creating VM: {0}'.format(data['error'])
+            )
+
     return ret
 
 
@@ -1778,6 +1836,150 @@ def delete_keypair(kwargs=None, call=None):
 
     params = {'Action': 'DeleteKeyPair',
               'KeyName.1': kwargs['keyname']}
+
+    data = query(params, return_root=True)
+    return data
+
+def userdata(vm_):
+    '''
+    Return a string containing the userdata script to run
+    '''
+    userdata_file = config.get_config_value(
+        'userdata', vm_, __opts__, default=None,
+        search_global=False
+    )
+    if userdata_file:
+        try:
+            minion = saltcloud.utils.minion_config(__opts__, vm_)
+            userdata = "\n".join(open(userdata_file).readlines()).replace('%MINION_PUB%', vm_['pub_key']).replace('%MINION_PEM%', vm_['priv_key']).replace('%MINION_ID%', vm_['name']).replace('%MASTER_HOST%', minion['master'])
+            return userdata
+        except IOError:
+            return False
+    else:
+        return False
+
+def create_elb(kwargs=None, call=None):
+    '''
+    Create an Elastic Load Balancer
+    '''
+    if call != 'function':
+        log.error(
+            'The create_elb function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'zones' not in kwargs:
+        log.error('At least one Availability Zone is required.')
+        return False
+
+    if 'listeners' not in kwargs:
+        log.error('At least one Listener is required.')
+        return False
+
+    params = {'Action': 'CreateLoadBalancer',
+              'LoadBalancerName': kwargs['loadbalancername']
+              # TODO: fix VPC / scheme
+              # 'Scheme': kwargs['scheme']
+              }
+
+    # AvailabilityZones
+    # zones=us-west-2a;us-west-2b
+    zones = kwargs['zones'].split(';')
+    for index in range(0, len(zones)):
+        params['AvailabilityZones.member.' + str(index+1)] = zones[index]
+
+    # Listeners
+    # listeners=protocol=HTTP,lb-port=80,instance-port=80,instance-protocol=HTTP;TCP,lb-port=443,instance-port=443,instance-protocol=TCP
+    # TODO: find a better delimeter than ;
+    listeners = kwargs['listeners'].split(';')
+    for index in range(0, len(listeners)):
+        listener = dict((k.lower(), v) for k,v in (el.split('=') for el in listeners[index].split(',')))
+        if 'protocol' in listener and 'instance-port' in listener and 'lb-port' in listener:
+            params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['protocol']
+            params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
+            params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
+        else:
+            log.error('protocol, instance-port, lb-port are required parameters')
+            return False
+        if 'instance-protocol' in listener: 
+            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['instance-protocol']
+        if 'cert-id' in listener:
+            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
+    # Subnets and Security groups only required for VPC?
+
+    # SecurityGroups
+    # securitygroups=http-servers;db-servers;default
+    if 'securitygroups' in kwargs:
+        securitygroups = kwargs['securitygroups'].split(';')
+        for index in range(0, len(securitygroups)):
+            params['SecurityGroups.member.' + str(index+1)] = securitygroups[index]
+
+    # Subnets
+    if 'subnets' in kwargs:
+        subnets = kwargs['subnets'].split(';')
+        for index in range(0, len(subnets)):
+            params['Subnets.member.' + str(index+1)] = subnets[index]
+
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+def attach_elb(kwargs=None, call=None):
+    '''
+    Create an Elastic Load Balancer
+    '''
+    if call != 'function':
+        log.error(
+            'The create_elb function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'instances' not in kwargs:
+        log.error('At least one instance id is required.')
+        return False
+
+    params = {'Action': 'RegisterInstancesWithLoadBalancer',
+              'LoadBalancerName': kwargs['loadbalancername']
+              }
+
+    # Instances.member.N instances=i-184dbd7b;i-b6d5b9dc
+    instances = kwargs['instances'].split(';')
+    for index in range(0, len(instances)):
+        params['Instances.member.{0}.InstanceId'.format(index+1)] = instances[index]
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+def create_vpc(kwargs=None, call=None):
+    '''
+    Create an Elastic Load Balancer
+    '''
+    if call != 'function':
+        log.error(
+            'The create_vpc function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'cidr-block' not in kwargs:
+        log.error('cidr-block must be specified.')
+        return False
+
+    if 'instance-tenancy' not in kwargs:
+        kwargs['instance-tenancy'] = 'default'
+        
+    params = {'Action': 'CreateVpc',
+              'InstanceTenancy': kwargs['instance-tenancy'],
+              'CidrBlock': kwargs['cidr-block']
+              }
 
     data = query(params, return_root=True)
     return data
