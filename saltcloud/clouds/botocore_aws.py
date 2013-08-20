@@ -249,3 +249,59 @@ def _toggle_term_protect(name, enabled):
     msg = 'Bad response from AWS: {0}'.format(http_response.status_code)
     log.error(msg)
     return msg
+
+def get_password(name, call=None):
+    '''
+    Get the Administrator password of a Windows instance
+
+    CLI Example::
+
+        salt-cloud -a get_password mymachine
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'This action must be called with -a or --action.'
+        )
+
+    # region is required for all boto queries
+    region = get_location(None)
+
+    # init botocore
+    vm_ = get_configured_provider()
+    session = botocore.session.get_session()
+    session.set_credentials(
+        access_key=config.get_config_value(
+            'id', vm_, __opts__, search_global=False
+        ),
+        secret_key=config.get_config_value(
+            'key', vm_, __opts__, search_global=False
+        )
+    )
+
+    service = session.get_service('ec2')
+    endpoint = service.get_endpoint(region)
+
+    # get the instance-id for the supplied node name
+    conn = get_conn(location=region)
+    node = get_node(conn, name)
+
+    params = {
+        'instance_id': node.id
+    }
+
+    # get instance information
+    operation = service.get_operation('get-password-data')
+    http_response, response_data = operation.call(endpoint, **params)
+
+    if http_response.status_code == 200:
+        msg = 'Password for Administrator: {0}'.format(
+            response_data
+        )
+        log.info(msg)
+        return msg
+
+    # No proper HTTP response!?
+    msg = 'Bad response from AWS: {0}'.format(http_response.status_code)
+    log.error(msg)
+    return msg
+
