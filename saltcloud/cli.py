@@ -258,17 +258,19 @@ class SaltCloud(parsers.SaltCloudParser):
         elif self.options.function:
             kwargs = {}
             args = self.args[:]
+            unparsed_args = []
             for arg in args:
                 if '=' in arg:
-                    key, value = arg.split('=')
+                    key, value = arg.split('=',1)
                     kwargs[key] = value
-                    args.remove(arg)
+                else:
+                    unparsed_args.add(arg)
 
-            if args:
+            if unparsed_args:
                 self.error(
                     'Any arguments passed to --function need to be passed '
                     'as kwargs. Ex: image=ami-54cf5c3d. Remaining '
-                    'arguments: {0}'.format(args)
+                    'arguments: {0}'.format(unparsed_args)
                 )
             try:
                 ret = mapper.do_function(
