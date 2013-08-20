@@ -1557,6 +1557,92 @@ def _toggle_term_protect(name, value):
 
     return show_term_protect(name=name, instance_id=instance_id, call='action')
 
+def show_sourcedest_check(name=None, instance_id=None, call=None, quiet=False):
+    '''
+    Show the details from EC2 concerning an AMI
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The show_sourcedest_check action must be called with -a or --action.'
+        )
+
+    if not instance_id:
+        instances = list_nodes_full()
+        instance_id = instances[name]['instanceId']
+    params = {'Action': 'DescribeInstanceAttribute',
+              'InstanceId': instance_id,
+              'Attribute': 'sourceDestCheck'}
+    result = query(params, return_root=True)
+
+    sourcedest_check = False
+    for item in result:
+        if 'value' in item:
+            sourcedest_check = item['value']
+            break
+
+    log.log(
+        logging.DEBUG if quiet is True else logging.INFO,
+        'Source/Destination Check is {0} for {1}'.format(
+            sourcedest_check == 'true' and 'enabled' or 'disabled',
+            name
+        )
+    )
+
+    return sourcedest_check
+
+
+def enable_sourcedest_check(name, call=None):
+    '''
+    Enable the source/destination check on a machine
+
+    CLI Example::
+
+        salt-cloud -a enable_sourcedest_check mymachine
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The enable_sourcedest_check action must be called with '
+            '-a or --action.'
+        )
+
+    return _toggle_sourcedest_check(name, 'true')
+
+
+def disable_sourcedest_check(name, call=None):
+    '''
+    Disable the source/destination check on a machine
+
+    CLI Example::
+
+        salt-cloud -a disable_sourcedest_check mymachine
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The disable_sourcedest_check action must be called with '
+            '-a or --action.'
+        )
+
+    return _toggle_sourcedest_check(name, 'false')
+
+def _toggle_sourcedest_check(name, value):
+    '''
+    Toggle source/destination check on a node
+
+    CLI Example::
+
+        salt-cloud -a enable_sourcedest_check mymachine
+        salt-cloud -a disable_sourcedest_check mymachine
+    '''
+    instances = list_nodes_full()
+    instance_id = instances[name]['instanceId']
+    params = {'Action': 'ModifyInstanceAttribute',
+              'InstanceId': instance_id,
+              'SourceDestCheck.Value': value}
+
+    query(params, return_root=True)
+
+    return show_sourcedest_check(name=name, instance_id=instance_id, call='action')
+
 
 def keepvol_on_destroy(name, call=None):
     '''
@@ -1958,7 +2044,7 @@ def attach_elb(kwargs=None, call=None):
 
 def create_vpc(kwargs=None, call=None):
     '''
-    Create an Elastic Load Balancer
+    Create a Virtual Private Cloud
     '''
     if call != 'function':
         log.error(
@@ -1983,3 +2069,236 @@ def create_vpc(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
+
+def create_subnet(kwargs=None, call=None):
+    '''
+    Create a Subnet within a VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The create_subnet function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    if 'cidr-block' not in kwargs:
+        log.error('cidr-block must be specified.')
+        return False
+
+    params = {'Action': 'CreateSubnet',
+              'VpcId': kwargs['vpc-id'],
+              'CidrBlock': kwargs['cidr-block']
+              }
+
+    if 'zone' in kwargs:
+        params['AvailabilityZone'] = kwargs['zone']
+
+    data = query(params, return_root=True)
+    return data
+
+def create_igw(kwargs=None, call=None):
+    '''
+    Create an Internet Gateway for use with VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The create_igw function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    params = {'Action': 'CreateInternetGateway'
+              }
+
+    data = query(params, return_root=True)
+    return data
+
+
+ 
+def attach_igw(kwargs=None, call=None):
+    '''
+    Attach an existing Internet Gateway to VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The attach_igw function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    if 'igw-id' not in kwargs:
+        log.error('igw-id must be specified.')
+        return False
+
+    params = {'Action': 'AttachInternetGateway',
+              'VpcId': kwargs['vpc-id'],
+              'InternetGatewayId': kwargs['igw-id']
+              }
+
+    data = query(params, return_root=True)
+    return data
+
+def create_routetable(kwargs=None, call=None):
+    '''
+    Create a Route Table within a VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The create_routettable function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    params = {'Action': 'CreateRouteTable',
+              'VpcId': kwargs['vpc-id']
+              }
+
+    data = query(params, return_root=True)
+    return data
+
+def create_route(kwargs=None, call=None):
+    '''
+    Create a route within an existing route table
+    '''
+    if call != 'function':
+        log.error(
+            'The create_route function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'rtb-id' not in kwargs:
+        log.error('routetablrtb-id must be specified.')
+        return False
+
+    if 'dest-cidr-block' not in kwargs:
+        log.error('dest-cidr-block must be specified.')
+        return False
+
+    params = {'Action': 'CreateRoute',
+              'RouteTableId': kwargs['rtb-id'],
+              'DestinationCidrBlock': kwargs['dest-cidr-block']
+              }
+
+    if 'gateway-id' in kwargs:
+        params['GatewayId'] = kwargs['gateway-id']
+    elif 'instance-id' in kwargs:
+        params['InstanceId'] = kwargs['instance-id']
+    elif 'interface-id' in kwargs:
+        params['NetworkInterfaceId'] = kwargs['interface-id']
+    else:
+        log.error('One of gateway-id, instance-id, interface-id must be specified.')
+        return False
+
+    data = query(params, return_root=True)
+    return data
+
+def attach_subnet(kwargs=None, call=None):
+    '''
+    Associate an existing subnet with an existing route table
+    '''
+    if call != 'function':
+        log.error(
+            'The attach_subnet function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'rtb-id' not in kwargs:
+        log.error('rtb-id must be specified.')
+        return False
+
+    if 'subnet-id' not in kwargs:
+        log.error('subnet-id must be specified.')
+        return False
+
+    params = {'Action': 'AssociateRouteTable',
+              'RouteTableId': kwargs['rtb-id'],
+              'SubnetId': kwargs['subnet-id']
+              }
+
+    data = query(params, return_root=True)
+    return data
+
+def create_eip(kwargs=None, call=None):
+    '''
+    Allocate an Elastic IP Address
+    '''
+    if call != 'function':
+        log.error(
+            'The create_eip function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    params = {'Action': 'AllocateAddress',
+              }
+
+    if 'domain' in kwargs:
+        params['Domain'] = kwargs['domain']
+
+    data = query(params, return_root=True)
+    return data
+
+def attach_eip(kwargs=None, call=None):
+    '''
+    Associate an Elastic IP Address with an existing instance
+    '''
+    if call != 'function':
+        log.error(
+            'The create_eip function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    params = {'Action': 'AssociateAddress' }
+    
+    if 'public-ip' in kwargs:
+        params['PublicIp'] = kwargs['public-ip']
+
+    if 'instance-id' in kwargs:
+        params['InstanceId'] = kwargs['instance-id']
+
+    if 'allocation-id' in kwargs:
+        params['AllocationId'] = kwargs['allocation-id']
+
+    if 'inteface-id' in kwargs:
+        params['NetworkInterfaceId'] = kwargs['interface-id']
+
+    if 'private-id' in kwargs:
+        params['PrivateIpAddress'] = kwargs['private-ip']
+
+    if 'allow-reassociation' in kwargs:
+        params['AllowReassociation'] = kwargs['allow-reassociation']
+
+    data = query(params, return_root=True)
+    return data
+
