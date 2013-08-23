@@ -2266,6 +2266,7 @@ def create_eip(kwargs=None, call=None):
     data = query(params, return_root=True)
     return data
 
+# TODO make into an actoin
 def attach_eip(kwargs=None, call=None):
     '''
     Associate an Elastic IP Address with an existing instance
@@ -2302,3 +2303,125 @@ def attach_eip(kwargs=None, call=None):
     data = query(params, return_root=True)
     return data
 
+def create_sg(kwargs=None, call=None):
+    '''
+    Create a new Security Group
+    '''
+    if call != 'function':
+        log.error(
+            'The create_sg function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'group-name' not in kwargs:
+        log.error('group-name must be specified.')
+        return False
+
+    if 'group-desc' not in kwargs:
+        log.error('group-desc must be specified.')
+        return False
+
+    params = {'Action': 'CreateSecurityGroup',
+              'GroupName': kwargs['group-name'],
+              'GroupDescription': kwargs['group-desc'],
+              }
+
+    if 'vpc-id' in kwargs:
+        params['VpcId'] = kwargs['vpc-id']
+        
+    data = query(params, return_root=True)
+    return data
+
+
+def create_ingress_rule(kwargs=None, call=None):
+    '''
+    Create a new Security Group Ingress Rule on an existing Security Group
+    '''
+    if call != 'function':
+        log.error(
+            'The create_ingress_rule function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    params = { 'Action': 'AuthorizeSecurityGroupIngress' }
+
+    if 'group-id' in kwargs:
+        params['GroupId'] = kwargs['group-id']
+    elif 'group-name' in kwargs:
+        params['GroupName'] = kwargs['group-name']
+    else:
+        log.error('One of group-name or group-id must be specified.')
+        return False
+
+    if not _parse_ip_permissions(kwargs, params):
+        log.error('Failed to parse rules (IpPermissions)')
+        return False
+        
+    data = query(params, return_root=True)
+    return data
+
+def create_egress_rule(kwargs=None, call=None):
+    '''
+    Create a new Security Group Egress Rule on an existing Security Group
+    '''
+    if call != 'function':
+        log.error(
+            'The create_egress_rule function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'group-id' not in kwargs:
+        log.error('group-id must be specified.')
+        return False
+
+    params = { 'Action': 'AuthorizeSecurityGroupEgress',
+               'GroupId': kwargs['group-id'] }
+
+    if not _parse_ip_permissions(kwargs, params):
+        log.error('Failed to parse rules (IpPermissions)')
+        return False
+
+    data = query(params, return_root=True)
+    return data
+
+def _parse_ip_permissions(kwargs = None, params = None):
+    if not isinstance(kwargs, dict) or not isinstance(params, dict):
+        log.error('_parse_ip_permissions must be passed instances of kwargs and params')
+        return False
+
+    if 'rules' not in kwargs:
+        log.error('rules is a required parameter')
+        return False
+
+    rules = kwargs['rules'].split(';')
+    for index in range(0, len(rules)):
+        rule = dict((k.lower(), v) for k,v in (el.split('=') for el in rules[index].split(',')))
+        if 'protocol' in rule:
+            params['IpPermissions.{0}.IpProtocol'.format(index+1)] = rule['protocol']
+            if 'from-port' in rule:
+                params['IpPermissions.{0}.FromPort'.format(index+1)] = rule['from-port']
+            if 'to-port' in rule:
+                params['IpPermissions.{0}.ToPort'.format(index+1)] = rule['to-port']
+            # TODO: make this implementation support multiple ip-ranges / groups per rule
+            if 'ip-range' in rule:
+                params['IpPermissions.{0}.IpRanges.1.CidrIp'.format(index+1)] = rule['ip-range']                
+            if 'group-name' in rule:
+                params['IpPermissions.{0}.Groups.1.GroupName'.format(index+1)] = rule['group-name']                
+            if 'group-id' in rule:
+                params['IpPermissions.{0}.Groups.1.GroupId'.format(index+1)] = rule['group-id']              
+            if 'user-id' in rule:
+                params['IpPermissions.{0}.Groups.1.UserId'.format(index+1)] = rule['user-id']                
+        else:
+            log.error('rules.protocol is a required parameter')
+            return False
+
+    return True
