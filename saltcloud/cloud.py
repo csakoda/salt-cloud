@@ -686,6 +686,234 @@ class Cloud(object):
 
         return ret
 
+    def create_vpc(self, vpc_, local_master=True):
+        '''
+        Create a single VPC
+        '''
+        output = {}
+
+        alias, driver = vpc_['provider'].split(':')
+        required_funcs = [ '{0}.create_vpc'.format(driver), '{0}.create_subnet'.format(driver), '{0}.create_igw'.format(driver), '{0}.attach_igw'.format(driver), '{0}.create_routetable'.format(driver), '{0}.create_route'.format(driver), '{0}.attach_subnet'.format(driver), '{0}.create_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.create_sg'.format(driver), '{0}.create_ingress_rule'.format(driver), '{0}.create_egress_rule'.format(driver) ]
+        for fun in required_funcs:
+            if fun not in self.clouds:
+                log.error(
+                    'Creating {0[name]!r} using {0[provider]!r} as the provider '
+                    'cannot complete since {1!r} does not implement {2!r} is not available'.format(
+                        vpc_,
+                        driver,
+                        fun
+                        )
+                    )
+                return
+        try:
+            alias, driver = vpc_['provider'].split(':')
+            create_vpc = '{0}.create_vpc'.format(driver)
+            with CloudProviderContext(self.clouds[create_vpc], alias, driver):
+                output = self.clouds[create_vpc](vpc_, call='function')
+                if 'error' in output:
+                    return output['error']
+                vpc_['vpc-id'] = output[1]['vpcId']
+                log.info('Created VPC {0}'.format(vpc_['vpc-id']))
+                time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready 
+
+            create_subnet = '{0}.create_subnet'.format(driver)
+            with CloudProviderContext(self.clouds[create_subnet], alias, driver):
+                for subnet_name in vpc_['subnets']:
+                    subnet = vpc_['subnets'][subnet_name]
+                    subnet['vpc-id'] = vpc_['vpc-id']
+                    output = self.clouds[create_subnet](subnet, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    subnet['subnet-id'] = output[1]['subnetId']
+                    log.info('Created subnet {0} in VPC {1}'.format(subnet['subnet-id'],
+                                                                   subnet['vpc-id']))
+
+            create_sg = '{0}.create_sg'.format(driver)
+            create_ingress_rule = '{0}.create_ingress_rule'.format(driver)
+            create_egress_rule = '{0}.create_egress_rule'.format(driver)
+            with CloudProviderContext(self.clouds[create_sg], alias, driver):
+                for sg_name in vpc_['securitygroups']:
+                    sg = vpc_['securitygroups'][sg_name]
+                    sg['group-name'] = sg_name
+                    sg['vpc-id'] = vpc_['vpc-id']
+                    output = self.clouds[create_sg](sg, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    sg['group-id'] = output[2]['groupId']
+                    log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
+                                                                            sg['vpc-id']))
+                    time.sleep(3) # TODO make into a proper API based wait
+                    if 'inbound-rules' in sg:
+                        rules = { 'group-id': sg['group-id'], 'rules': sg['inbound-rules'] }
+                        output = self.clouds[create_ingress_rule](rules, call='function')
+                        if 'error' in output:
+                            return output['error']
+                        log.info('Created inbound rule {0!r} in security group {1}'.format(rules['rules'],
+                                                                                           rules['group-id']))
+                    if 'outbound-rules' in sg:
+                        rules = { 'group-id': sg['group-id'], 'rules': sg['outbound-rules'] }
+                        output = self.clouds[create_egress_rule](rules, call='function')
+                        if 'error' in output:
+                            return output['error']
+                        log.info('Created outbound rule {0!r} in security group {1}'.format(rules['rules'],
+                                                                                            rules['group-id']))
+                   
+
+            create_routetable = '{0}.create_routetable'.format(driver)
+            create_route = '{0}.create_route'.format(driver)
+            create_igw = '{0}.create_igw'.format(driver)
+            attach_igw = '{0}.attach_igw'.format(driver)
+            describe_instance = '{0}.describe_instance'.format(driver)
+            attach_subnet = '{0}.attach_subnet'.format(driver)
+            create_eip = '{0}.create_eip'.format(driver)
+            attach_eip = '{0}.attach_eip'.format(driver)
+
+            with CloudProviderContext(self.clouds[create_routetable], alias, driver):
+                # this is a limited implementation, needs minor refactor to support
+                # generalized routetables .. right now optimized for the basic private/public
+                # VPC setup covered here: 
+                # http://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_NAT_Instance.html
+                for rtb_type in [ 'public_rtb', 'private_rtb' ]:
+                    if rtb_type in vpc_['routetables']:
+                        rtb = vpc_['routetables'][rtb_type]
+                        rtb['vpc-id'] = vpc_['vpc-id']
+                        output = self.clouds[create_routetable](rtb, call='function')
+                        if 'error' in output:
+                            return output['error']
+                        rtb['rtb-id'] = output[1]['routeTableId']
+                        log.info('Created routetable {0} in VPC {1}'.format(rtb['rtb-id'],
+                                                                            rtb['vpc-id']))
+                        # make routes / attach subnets while we have rtb-id in context
+                        if 'gateway-id' in rtb:
+                            if rtb['gateway-id'] == 'new':
+                                # auto-prov a new internet gateway and attach it
+                                output = self.clouds[create_igw](call='function')
+                                if 'error' in output:
+                                    return output['error']
+                                vpc_['igw-id'] = output[1]['internetGatewayId']
+                                log.info('Created internet gateway {0}'.format(vpc_['igw-id']))
+                                rtb['gateway-id'] = vpc_['igw-id']
+                            output = self.clouds[attach_igw](vpc_,call='function')
+                            if 'error' in output:
+                                return output['error']
+                            log.info('Attached internet gateway {0} to VPC {1}'.format(vpc_['igw-id'],
+                                                                                       vpc_['vpc-id']))
+                        if 'instance-id' in rtb:
+                            if rtb['instance-id'] == 'nat':
+                                try:
+                                    profile_name = vpc_['nat']['profile']
+                                    profile_details = self.opts['profiles'][profile_name]
+                                    vm_ = profile_details.copy()
+                                    vm_['name'] = vpc_['vpc-id'] + '-' + profile_name
+                                    vm_['subnetid'] = vpc_['subnets'][vpc_['nat']['subnet']]['subnet-id']
+                                    vm_['securitygroupid'] = vpc_['securitygroups'][vpc_['nat']['securitygroup']]['group-id']
+                                    ret = {}
+                                    try:
+                                        # No need to use CloudProviderContext here because self.create
+                                        # takes care of that
+                                        ret[vm_['name']] = self.create(vm_)
+                                        if self.opts.get('show_deploy_args', False) is False:
+                                            ret[vm_['name']].pop('deploy_kwargs', None)
+                                    except (SaltCloudSystemExit, SaltCloudConfigError), exc:
+                                        raise
+                                    rtb['instance-id'] = ret[vm_['name']]['instanceId']
+                                    log.info('Created NAT instance {0} using profile {1} '
+                                             'in subnet {2}, security group {3}, VPC {4}'
+                                             .format(rtb['instance-id'],
+                                                     profile_name,
+                                                     vm_['subnetid'],
+                                                     vm_['securitygroupid'],
+                                                     vpc_['vpc-id']))
+                                    while True:
+                                        output = self.clouds[describe_instance](instance_id=rtb['instance-id'], call='action')
+                                        if 'error' in output:
+                                            return output['error'] 
+                                        if output[1]['item']['instancesSet']['item']['instanceState']['name'] == 'running':
+                                            break
+                                        log.info('Waiting for NAT instance to be ready.  Checking again in 10 seconds.')
+                                        time.sleep(10)
+                                    output = self.clouds[create_eip]({ 'domain': 'vpc' }, call='function')
+                                    if 'error' in output:
+                                        return output['error']
+                                    public_ip = output[1]['publicIp']
+                                    log.info('Created Elastic IP {0}'.format(public_ip))
+                                    output = self.clouds[attach_eip]({ 'allocation-id': output[3]['allocationId'],
+                                                                       'instance-id': rtb['instance-id']}, 
+                                                                     call='function')
+                                    if 'error' in output:
+                                        return output['error'] 
+                                    log.info('Attached Elastic IP {0} to instance {1}'.format(public_ip, 
+                                                                                              rtb['instance-id']))
+                                except (SaltCloudException, Exception) as exc:
+                                    msg = 'There was a profile error: {0}'
+                                    self.handle_exception(msg, exc)
+                        output = self.clouds[create_route](rtb, call='function')
+                        if 'error' in output:
+                            return output['error']
+                        log.info('Created route {0!r}'.format(rtb))
+                        if 'subnets' in rtb:
+                            for subnet_name in rtb['subnets']:
+                                subnet = { 'subnet-id': vpc_['subnets'][subnet_name]['subnet-id'],
+                                           'rtb-id': rtb['rtb-id'] }
+                                output = self.clouds[attach_subnet](subnet, call='function')
+                                if 'error' in output:
+                                    return output['error']
+                                log.info('Attached subnet {0} to routetable {1}'.format(subnet['subnet-id'],
+                                                                                         subnet['rtb-id']))
+
+        except KeyError as exc:
+            log.exception(
+                'Failed to create VM {0}. Configuration value {1} needs '
+                'to be set'.format(
+                    vpc_['name'], exc
+                )
+            )
+
+    def run_vpc_profile(self, profile, names):
+        '''
+        Parse over the options passed on the command line and determine how to
+        handle them
+        '''
+        if profile not in self.opts['vpc_profiles']:
+            msg = 'VPC Profile {0} is not defined'.format(profile)
+            log.error(msg)
+            return {'Error': msg}
+
+        ret = {}
+        profile_details = self.opts['vpc_profiles'][profile]
+        alias, driver = profile_details['provider'].split(':')
+
+        name = names[0]
+
+        # this all gets done so we can check if we're really supposed to stand it up again
+        # there is probably something similar we should do in the VPC world
+        #mapped_providers = self.map_providers_parallel()
+        #alias_data = mapped_providers.setdefault(alias, {})
+        #vms = alias_data.setdefault(driver, {})
+        from pprint import pprint
+        pprint(profile_details)
+        
+        #for name in names:
+        #     if name in vms and vms[name]['state'].lower() != 'terminated':
+        #         msg = '{0} already exists under {0}:{1}'.format(
+        #             name, alias, driver
+        #         )
+        #         log.error(msg)
+        #         ret[name] = {'Error': msg}
+        #         continue
+
+        vpc_ = profile_details.copy()
+        vpc_['name'] = name
+        try:
+            # No need to use CloudProviderContext here because self.create
+            # takes care of that
+            ret[name] = self.create_vpc(vpc_)
+        except (SaltCloudSystemExit, SaltCloudConfigError), exc:
+            ret[name] = {'Error': exc.message}
+
+        return ret
+
+
     def do_action(self, names, kwargs):
         '''
         Perform an action on a VM which may be specific to this cloud provider
@@ -830,6 +1058,36 @@ class Cloud(object):
 
             if not self.opts['providers'][alias]:
                 self.opts['providers'].pop(alias)
+
+    def handle_exception(self, msg, exc):
+        if isinstance(exc, SaltCloudException):
+            # It's a know exception an we know own to handle it
+            if isinstance(exc, SaltCloudSystemExit):
+                # This is a salt cloud system exit
+                if exc.exit_code > 0:
+                    # the exit code is bigger than 0, it's an error
+                    msg = 'Error: {0}'.format(msg)
+                self.exit(
+                    exc.exit_code,
+                    '{0}\n'.format(
+                        msg.format(exc.message.rstrip())
+                    )
+                )
+            # It's not a system exit but it's an error we can
+            # handle
+            self.error(
+                msg.format(exc.message)
+            )
+        # This is a generic exception, log it, include traceback if
+        # debug logging is enabled and exit.
+        log.error(
+            msg.format(exc),
+            # Show the traceback if the debug logging level is
+            # enabled
+            exc_info=log.isEnabledFor(logging.DEBUG)
+        )
+        self.exit(1)
+
 
 
 class Map(Cloud):

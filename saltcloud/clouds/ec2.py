@@ -838,28 +838,28 @@ def create(vm_=None, call=None):
         log.info('Salt node data. Public_ip: {0}'.format(ip_address))
 
     ret = {}
-    if not ex_userdata:
+    if not ex_userdata: # TODO: make this less hacky, it is too speciialized for the windows scenario
         display_ssh_output = config.get_config_value(
             'display_ssh_output', vm_, __opts__, default=True
         )
 
-        if saltcloud.utils.wait_for_ssh(ip_address):
-            for user in usernames:
-                if saltcloud.utils.wait_for_passwd(
-                    host=ip_address,
-                    username=user,
-                    ssh_timeout=60,
-                    key_filename=key_filename,
-                    display_ssh_output=display_ssh_output
-                ):
-                    username = user
-                    break
-            else:
-                raise SaltCloudSystemExit(
-                    'Failed to authenticate against remote ssh'
-                )
-
         if config.get_config_value('deploy', vm_, __opts__) is True:
+            if saltcloud.utils.wait_for_ssh(ip_address):
+                for user in usernames:
+                    if saltcloud.utils.wait_for_passwd(
+                        host=ip_address,
+                        username=user,
+                        ssh_timeout=60,
+                        key_filename=key_filename,
+                        display_ssh_output=display_ssh_output
+                    ):
+                        username = user
+                        break
+                else:
+                    raise SaltCloudSystemExit(
+                        'Failed to authenticate against remote ssh'
+                    )
+
             deploy_script = script(vm_)
             deploy_kwargs = {
                 'host': ip_address,
@@ -911,7 +911,6 @@ def create(vm_=None, call=None):
                 log.info('Salt installed on {name}'.format(**vm_))
             else:
                 log.error('Failed to start Salt on Cloud VM {name}'.format(**vm_))
-
     else:
         password = saltcloud.utils.wait_for_windows_passwd(vm_)
         if password:
@@ -1643,6 +1642,22 @@ def _toggle_sourcedest_check(name, value):
 
     return show_sourcedest_check(name=name, instance_id=instance_id, call='action')
 
+def describe_instance(name=None, instance_id=None, call=None):
+    '''
+    Show the details from EC2 of an existing instance
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The describe_instance action must be called with -a or --action.'
+        )
+
+    if not instance_id:
+        instances = list_nodes_full()
+        instance_id = instances[name]['instanceId']
+    params = {'Action': 'DescribeInstances',
+              'InstanceId.1': instance_id }
+    result = query(params, return_root=True)
+    return result
 
 def keepvol_on_destroy(name, call=None):
     '''
@@ -2120,8 +2135,6 @@ def create_igw(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
-
-
  
 def attach_igw(kwargs=None, call=None):
     '''
@@ -2294,7 +2307,7 @@ def attach_eip(kwargs=None, call=None):
     if 'inteface-id' in kwargs:
         params['NetworkInterfaceId'] = kwargs['interface-id']
 
-    if 'private-id' in kwargs:
+    if 'private-ip' in kwargs:
         params['PrivateIpAddress'] = kwargs['private-ip']
 
     if 'allow-reassociation' in kwargs:
@@ -2402,9 +2415,13 @@ def _parse_ip_permissions(kwargs = None, params = None):
         log.error('rules is a required parameter')
         return False
 
-    rules = kwargs['rules'].split(';')
+
+    if not isinstance(kwargs['rules'], list):
+        rules = dict((k.lower(), v) for k,v in (el.split('=') for el in (rules[index].split(',') for rules in kwargs['rules'].split(';'))))
+    else:
+        rules = kwargs['rules']
     for index in range(0, len(rules)):
-        rule = dict((k.lower(), v) for k,v in (el.split('=') for el in rules[index].split(',')))
+        rule = rules[index]
         if 'protocol' in rule:
             params['IpPermissions.{0}.IpProtocol'.format(index+1)] = rule['protocol']
             if 'from-port' in rule:
