@@ -767,7 +767,7 @@ class Cloud(object):
             attach_subnet = '{0}.attach_subnet'.format(driver)
             create_eip = '{0}.create_eip'.format(driver)
             attach_eip = '{0}.attach_eip'.format(driver)
-
+            disable_sourcedest_check = '{0}.disable_sourcedest_check'.format(driver)
             with CloudProviderContext(self.clouds[create_routetable], alias, driver):
                 # this is a limited implementation, needs minor refactor to support
                 # generalized routetables .. right now optimized for the basic private/public
@@ -832,6 +832,10 @@ class Cloud(object):
                                             break
                                         log.info('Waiting for NAT instance to be ready.  Checking again in 10 seconds.')
                                         time.sleep(10)
+                                    output = self.clouds[disable_sourcedest_check](vm_['name'], call='action')
+                                    if 'error' in output:
+                                        return output['error']
+                                    log.info('Disabled source dest check for NAT instance {0}'.format(vm_['name']))
                                     output = self.clouds[create_eip]({ 'domain': 'vpc' }, call='function')
                                     if 'error' in output:
                                         return output['error']
