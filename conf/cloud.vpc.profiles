@@ -1,0 +1,34 @@
+appature_vpc:
+  provider: my-aws
+  cidr-block: 10.2.0.0/16
+  routetables:
+    public_rtb:
+      dest-cidr-block: 0.0.0.0/0
+      gateway-id: new # TODO implement 'igw' layer of indirection as per NAT
+      subnets:
+        - salt-public-subnet
+    private_rtb:
+      dest-cidr-block: 0.0.0.0/0
+      instance-id: nat # TODO implement 'nat' for NAT
+      subnets:
+        - salt-private-subnet
+  securitygroups:
+    salt-NAT-SG:
+      group-desc: somedesc
+      inbound-rules:
+        - { protocol: tcp, from-port: 80, to-port: 80, ip-range: 0.0.0.0/0 }
+        - { protocol: tcp, from-port: 443, to-port: 443, ip-range: 0.0.0.0/0 }
+      outbound-rules:
+        - { protocol: tcp, from-port: 80, to-port: 80, ip-range: 0.0.0.0/0 }
+        - { protocol: tcp, from-port: 443, to-port: 443, ip-range: 0.0.0.0/0 }
+  subnets:
+    salt-public-subnet:
+      cidr-block: 10.2.0.0/24
+      # zone: us-east-1b
+    salt-private-subnet:
+      cidr-block: 10.2.1.0/24
+      # zone: us-east-1b
+  nat: 
+    profile: vpc_nat_small
+    subnet: salt-public-subnet
+    securitygroup: salt-NAT-SG
