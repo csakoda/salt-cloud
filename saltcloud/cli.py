@@ -289,6 +289,15 @@ class SaltCloud(parsers.SaltCloudParser):
             except (SaltCloudException, Exception) as exc:
                 msg = 'There was a profile error: {0}'
                 self.handle_exception(msg, exc)
+        elif self.options.vpcprofile and self.config.get('names', False):
+            try:
+                ret = mapper.run_vpc_profile(
+                    self.options.vpcprofile,
+                    self.config.get('names')
+                )
+            except (SaltCloudException, Exception) as exc:
+                msg = 'There was a profile error: {0}'
+                self.handle_exception(msg, exc)
 
         elif self.config.get('map', None) and \
                 self.selected_query_option is None:

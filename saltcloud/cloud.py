@@ -736,9 +736,18 @@ class Cloud(object):
                     sg = vpc_['securitygroups'][sg_name]
                     sg['group-name'] = sg_name
                     sg['vpc-id'] = vpc_['vpc-id']
-                    output = self.clouds[create_sg](sg, call='function')
-                    if 'error' in output:
-                        return output['error']
+                    print 'Trying to make ' + str(sg)
+                    tries = 0
+                    while True:
+                        output = self.clouds[create_sg](sg, call='function')
+                        tries += 1
+                        if 'error' in output:
+                            time.sleep(5)
+                            if tries > 5:
+                                print output
+                                return output['error']
+                        else:
+                            break
                     sg['group-id'] = output[2]['groupId']
                     log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
                                                                             sg['vpc-id']))

@@ -775,7 +775,7 @@ def create(vm_=None, call=None):
             log.warn(
                 'There was an error in the query. {0} attempts '
                 'remaining: {1}'.format(
-                    attempts, data['error']
+                    attempts, data
                 )
             )
             attempts -= 1
@@ -912,11 +912,7 @@ def create(vm_=None, call=None):
             else:
                 log.error('Failed to start Salt on Cloud VM {name}'.format(**vm_))
     else:
-        password = saltcloud.utils.wait_for_windows_passwd(vm_)
-        if password:
-            log.info('Got Administrator password: {0}'.format(password))
-        else:
-            log.info('No Administrator password could be found.  Check back later with \'salt-cloud -a get_password {0}\''.format(vm_['name']))
+        log.info('Administrator password not yet generated.  Check back later with \'salt-cloud -a get_password {0}\''.format(vm_['name']))
  
     log.info('Created Cloud VM {0[name]!r}'.format(vm_))
     log.debug(

@@ -157,6 +157,12 @@ class ExecutionOptionsMixIn(object):
             help='Create an instance using the specified profile.'
         )
         group.add_option(
+            '-v', '--vpcprofile',
+            default=None,
+            help='Create a VPC using the specified profile.'
+        )
+
+        group.add_option(
             '-m', '--map',
             default=None,
             help='Specify a cloud map file to use for deployment. This option '
