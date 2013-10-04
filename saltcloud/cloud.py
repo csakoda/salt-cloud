@@ -736,18 +736,9 @@ class Cloud(object):
                     sg = vpc_['securitygroups'][sg_name]
                     sg['group-name'] = sg_name
                     sg['vpc-id'] = vpc_['vpc-id']
-                    print 'Trying to make ' + str(sg)
-                    tries = 0
-                    while True:
-                        output = self.clouds[create_sg](sg, call='function')
-                        tries += 1
-                        if 'error' in output:
-                            time.sleep(5)
-                            if tries > 5:
-                                print output
-                                return output['error']
-                        else:
-                            break
+                    output = self.clouds[create_sg](sg, call='function')
+                    if 'error' in output:
+                        return output['error']
                     sg['group-id'] = output[2]['groupId']
                     log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
                                                                             sg['vpc-id']))
@@ -807,6 +798,7 @@ class Cloud(object):
                                 return output['error']
                             log.info('Attached internet gateway {0} to VPC {1}'.format(vpc_['igw-id'],
                                                                                        vpc_['vpc-id']))
+                        # setup NAT route if defined
                         if 'instance-id' in rtb:
                             if rtb['instance-id'] == 'nat':
                                 try:
@@ -874,6 +866,18 @@ class Cloud(object):
                                 log.info('Attached subnet {0} to routetable {1}'.format(subnet['subnet-id'],
                                                                                          subnet['rtb-id']))
 
+            create_elb = '{0}.create_elb'.format(driver)
+            with CloudProviderContext(self.clouds[create_elb], alias, driver):
+                for elb_name in vpc_['elb']:
+                    elb = vpc_['elb'][elb_name].copy()
+                    elb['subnets'] = [vpc_['subnets'][subnet]['subnet-id'] for subnet in elb['subnets']]
+                    elb['securitygroups'] = [vpc_['securitygroups'][group]['group-id'] for group in elb['securitygroups']]
+                    elb['loadbalancername'] = elb_name
+                    output = self.clouds[create_elb](elb, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    vpc_['elb'][elb_name]['dns-name'] = output[0]['DNSName']
+                    log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(elb_name, vpc_['elb'][elb_name]['dns-name']))
         except KeyError as exc:
             log.exception(
                 'Failed to create VM {0}. Configuration value {1} needs '

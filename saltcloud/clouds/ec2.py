@@ -1968,8 +1968,8 @@ def create_elb(kwargs=None, call=None):
     if not kwargs:
         kwargs = {}
 
-    if 'zones' not in kwargs:
-        log.error('At least one Availability Zone is required.')
+    if 'zones' not in kwargs and 'subnets' not in kwargs:
+        log.error('At least one Availability Zone or SubnetId is required.')
         return False
 
     if 'listeners' not in kwargs:
@@ -1984,16 +1984,23 @@ def create_elb(kwargs=None, call=None):
 
     # AvailabilityZones
     # zones=us-west-2a;us-west-2b
-    zones = kwargs['zones'].split(';')
-    for index in range(0, len(zones)):
-        params['AvailabilityZones.member.' + str(index+1)] = zones[index]
+    if 'zones' in kwargs:
+        if not isinstance(kwargs['zones'], list):
+            zones = kwargs['zones'].split(';')
+        else:
+            zones = kwargs['zones']
+        for index in range(0, len(zones)):
+            params['AvailabilityZones.member.' + str(index+1)] = zones[index]
 
     # Listeners
     # listeners=protocol=HTTP,lb-port=80,instance-port=80,instance-protocol=HTTP;TCP,lb-port=443,instance-port=443,instance-protocol=TCP
     # TODO: find a better delimeter than ;
-    listeners = kwargs['listeners'].split(';')
+    if not isinstance(kwargs['listeners'], list):
+        listeners = _parse_str_parameters(kwargs['listeners'])
+    else:
+        listeners = kwargs['listeners']
     for index in range(0, len(listeners)):
-        listener = dict((k.lower(), v) for k,v in (el.split('=') for el in listeners[index].split(',')))
+        listener = listeners[index]
         if 'protocol' in listener and 'instance-port' in listener and 'lb-port' in listener:
             params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['protocol']
             params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
@@ -2010,16 +2017,21 @@ def create_elb(kwargs=None, call=None):
     # SecurityGroups
     # securitygroups=http-servers;db-servers;default
     if 'securitygroups' in kwargs:
-        securitygroups = kwargs['securitygroups'].split(';')
+        if not isinstance(kwargs['securitygroups'], list):
+            securitygroups = kwargs['securitygroups'].split(';')
+        else:
+            securitygroups = kwargs['securitygroups']
         for index in range(0, len(securitygroups)):
             params['SecurityGroups.member.' + str(index+1)] = securitygroups[index]
 
     # Subnets
     if 'subnets' in kwargs:
-        subnets = kwargs['subnets'].split(';')
+        if not isinstance(kwargs['subnets'], list):
+            subnets = kwargs['subnets'].split(';')
+        else:
+            subnets = kwargs['subnets']
         for index in range(0, len(subnets)):
             params['Subnets.member.' + str(index+1)] = subnets[index]
-
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
@@ -2411,9 +2423,8 @@ def _parse_ip_permissions(kwargs = None, params = None):
         log.error('rules is a required parameter')
         return False
 
-
     if not isinstance(kwargs['rules'], list):
-        rules = dict((k.lower(), v) for k,v in (el.split('=') for el in (rules[index].split(',') for rules in kwargs['rules'].split(';'))))
+        rules = _parse_str_parameters(kwargs['rules'])
     else:
         rules = kwargs['rules']
     for index in range(0, len(rules)):
@@ -2438,3 +2449,8 @@ def _parse_ip_permissions(kwargs = None, params = None):
             return False
 
     return True
+
+def _parse_str_parameters(params):
+    # Parses strings in the format 'a=1,b=2;c=3,d=4' in to a list of dictionaries
+    # i.e. [{'a': '1', 'b': '2'}, {'a': '3', 'b': '4'}]
+    return [dict(val.split('=') for val in param.split(',')) for param in params.split(';')]
