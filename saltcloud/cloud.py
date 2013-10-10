@@ -693,7 +693,7 @@ class Cloud(object):
         output = {}
 
         alias, driver = vpc_['provider'].split(':')
-        required_funcs = [ '{0}.create_vpc'.format(driver), '{0}.create_subnet'.format(driver), '{0}.create_igw'.format(driver), '{0}.attach_igw'.format(driver), '{0}.create_routetable'.format(driver), '{0}.create_route'.format(driver), '{0}.attach_subnet'.format(driver), '{0}.create_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.create_sg'.format(driver), '{0}.create_ingress_rule'.format(driver), '{0}.create_egress_rule'.format(driver) ]
+        required_funcs = [ '{0}.create_vpc'.format(driver), '{0}.create_subnet'.format(driver), '{0}.create_igw'.format(driver), '{0}.attach_igw'.format(driver), '{0}.create_routetable'.format(driver), '{0}.create_route'.format(driver), '{0}.attach_subnet'.format(driver), '{0}.create_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.create_sg'.format(driver), '{0}.create_ingress_rule'.format(driver), '{0}.create_egress_rule'.format(driver), '{0}.create_elb'.format(driver), '{0}.configure_elb_healthcheck'.format(driver) ]
         for fun in required_funcs:
             if fun not in self.clouds:
                 log.error(
@@ -867,6 +867,7 @@ class Cloud(object):
                                                                                          subnet['rtb-id']))
 
             create_elb = '{0}.create_elb'.format(driver)
+            configure_elb_healthcheck = '{0}.configure_elb_healthcheck'.format(driver)
             with CloudProviderContext(self.clouds[create_elb], alias, driver):
                 for elb_name in vpc_['elb']:
                     elb = vpc_['elb'][elb_name].copy()
@@ -878,6 +879,13 @@ class Cloud(object):
                         return output['error']
                     vpc_['elb'][elb_name]['dns-name'] = output[0]['DNSName']
                     log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(elb_name, vpc_['elb'][elb_name]['dns-name']))
+                    if 'healthcheck' in elb:
+                        check = elb['healthcheck'].copy()
+                        check['loadbalancername'] = elb_name
+                        output = self.clouds[configure_elb_healthcheck](check, call='function')
+                        if 'error' in output:
+                            return output['error']    
+                        log.info('Configured healthcheck for Elastic Load Balancer ' + elb_name)
         except KeyError as exc:
             log.exception(
                 'Failed to create VM {0}. Configuration value {1} needs '

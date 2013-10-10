@@ -729,6 +729,23 @@ def create(vm_=None, call=None):
             set_delvol_on_destroy
         ).lower()
 
+    # Get ANY defined volumes settings, merging data, in the following order
+    # 1. VM config
+    # 2. Profile config
+    # 3. Global configuration
+    volumes = config.get_config_value(
+        'volumes', vm_, __opts__, search_global=True
+    )
+
+    if volumes:
+        ephemerals = [vol for vol in volumes if 'virtualname' in vol]
+        if ephemerals:
+            device_index = 2
+            for vol in ephemerals:
+                params['BlockDeviceMapping.{0}.DeviceName'.format(device_index)] = vol['device']
+                params['BlockDeviceMapping.{0}.VirtualName'.format(device_index)] = vol['virtualname']
+                device_index += 1
+
     ex_userdata = userdata(vm_)
     if ex_userdata:
         log.info('Applying user data script')
@@ -2061,6 +2078,55 @@ def attach_elb(kwargs=None, call=None):
     instances = kwargs['instances'].split(';')
     for index in range(0, len(instances)):
         params['Instances.member.{0}.InstanceId'.format(index+1)] = instances[index]
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+def configure_elb_healthcheck(kwargs=None, call=None):
+    '''
+    Configure the Health Check on a pre-existing Elastic Load Balancer
+    '''
+    if call != 'function':
+        log.error(
+            'The create_elb function must be called with -f or --function.'
+            )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'healthythreshold' not in kwargs:
+        log.error('You must specifiy a healthythreshhold')
+        return False
+
+    if 'interval' not in kwargs:
+        log.error('You must specifiy an interval')
+        return False
+
+    if 'target' not in kwargs:
+        log.error('You must specifiy a target')
+        return False
+
+    if 'timeout' not in kwargs:
+        log.error('You must specifiy a timeout')
+        return False
+
+    if 'unhealthythreshold' not in kwargs:
+        log.error('You must specifiy an unhealthythreshold')
+        return False
+
+    if 'loadbalancername' not in kwargs:
+        log.error('You must specifiy the name of the Elastic Load Balancer you want to configure')
+        return False
+
+    params = {'Action': 'ConfigureHealthCheck',
+              'LoadBalancerName': kwargs['loadbalancername'],
+              'HealthCheck.HealthyThreshold': kwargs['healthythreshold'],
+              'HealthCheck.Interval': kwargs['interval'],
+              'HealthCheck.Target': kwargs['target'],
+              'HealthCheck.Timeout': kwargs['timeout'],
+              'HealthCheck.UnhealthyThreshold': kwargs['unhealthythreshold']
+              }
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
