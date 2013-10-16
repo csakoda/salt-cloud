@@ -1358,7 +1358,7 @@ def list_nodes_full(location=None):
         for loc in locations:
             ret.update(_list_nodes_full(loc))
         return ret
-
+    
     return _list_nodes_full(location)
 
 
@@ -1370,7 +1370,7 @@ def _vm_provider_driver(vm_):
     if driver not in __opts__['providers'][alias]:
         return None
 
-    return driver == 'ec2'
+    return vm_['provider'] == (__active_provider_name__ or 'ec2')
 
 
 def _extract_name_tag(item):

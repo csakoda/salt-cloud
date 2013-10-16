@@ -815,7 +815,7 @@ class Cloud(object):
                                         ret[vm_['name']] = self.create(vm_)
                                         if self.opts.get('show_deploy_args', False) is False:
                                             ret[vm_['name']].pop('deploy_kwargs', None)
-                                    except (SaltCloudSystemExit, SaltCloudConfigError), exc:
+                                    except (SaltCloudSystemExit, SaltCloudConfigError) as exc:
                                         raise
                                     rtb['instance-id'] = ret[vm_['name']]['instanceId']
                                     log.info('Created NAT instance {0} using profile {1} '
@@ -850,8 +850,7 @@ class Cloud(object):
                                     log.info('Attached Elastic IP {0} to instance {1}'.format(public_ip, 
                                                                                               rtb['instance-id']))
                                 except (SaltCloudException, Exception) as exc:
-                                    msg = 'There was a profile error: {0}'
-                                    self.handle_exception(msg, exc)
+                                    raise
                         output = self.clouds[create_route](rtb, call='function')
                         if 'error' in output:
                             return output['error']
