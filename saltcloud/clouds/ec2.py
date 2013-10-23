@@ -1355,6 +1355,8 @@ def list_nodes_full(location=None):
             get_location(vm_) for vm_ in __opts__['profiles'].values()
             if _vm_provider_driver(vm_)
         )
+        if len(locations) == 0:
+            locations = set([ get_location() ])
         for loc in locations:
             ret.update(_list_nodes_full(loc))
         return ret

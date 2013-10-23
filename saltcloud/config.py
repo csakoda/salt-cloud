@@ -834,7 +834,11 @@ def apply_vpc_profiles_config(providers, overrides, defaults=None):
 
         extended = vms.get(extends).copy()
         extended.pop('profile')
-        extended.update(details)
+        for key in details:
+            if key in extended and isinstance(extended[key], dict):
+                extended[key].update(details[key])
+            else:
+                extended[key] = details[key]
 
         if ':' not in extended['provider']:
             if extended['provider'] not in providers:

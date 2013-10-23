@@ -802,12 +802,11 @@ class Cloud(object):
                         if 'instance-id' in rtb:
                             if rtb['instance-id'] == 'nat':
                                 try:
-                                    profile_name = vpc_['nat']['profile']
-                                    profile_details = self.opts['profiles'][profile_name]
-                                    vm_ = profile_details.copy()
-                                    vm_['name'] = vpc_['vpc-id'] + '-' + profile_name
+                                    vm_ = vpc_['nat']
+                                    vm_['provider'] = vpc_['provider']
+                                    vm_['name'] = '{0}-{1}-NAT'.format(vpc_['name'], vpc_['vpc-id'])
                                     vm_['subnetid'] = vpc_['subnets'][vpc_['nat']['subnet']]['subnet-id']
-                                    vm_['securitygroupid'] = vpc_['securitygroups'][vpc_['nat']['securitygroup']]['group-id']
+                                    vm_['securitygroupid'] = vpc_['securitygroups'][vpc_['nat']['vpc_securitygroup']]['group-id']
                                     ret = {}
                                     try:
                                         # No need to use CloudProviderContext here because self.create
@@ -821,7 +820,7 @@ class Cloud(object):
                                     log.info('Created NAT instance {0} using profile {1} '
                                              'in subnet {2}, security group {3}, VPC {4}'
                                              .format(rtb['instance-id'],
-                                                     profile_name,
+                                                     vm_['name'],
                                                      vm_['subnetid'],
                                                      vm_['securitygroupid'],
                                                      vpc_['vpc-id']))
