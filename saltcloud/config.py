@@ -443,8 +443,7 @@ def apply_vm_profiles_config(providers, overrides, defaults=None):
             vms.pop(profile)
             continue
 
-        extended = vms.get(extends).copy()
-        extended.pop('profile')
+        extended = _get_extended_details(vms, extends)
         extended.update(details)
 
         if ':' not in extended['provider']:
@@ -483,6 +482,17 @@ def apply_vm_profiles_config(providers, overrides, defaults=None):
         vms[profile] = extended
 
     return vms
+
+# TODO: detect circular dependencies
+def _get_extended_details(vms, extends):
+    extended = vms.get(extends).copy()
+    extended.pop('profile')
+    if 'extends' in extended:
+        extends = extended.pop('extends')
+        parent = _get_extended_details(vms, extends)
+        parent.update(extended)
+        extended = parent
+    return extended
 
 
 def cloud_providers_config(path,
