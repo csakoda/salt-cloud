@@ -1879,6 +1879,28 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
     return data
 
 
+def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
+    '''
+    Create a snapshot of a volume or comma-separated list of volumes
+    '''
+    if not kwargs:
+        kwargs = {}
+
+    if 'volume_id' not in kwargs:
+        log.error('A volume_id is required.')
+	return False
+
+    data = []
+
+    for vol in kwargs['volume_id'].split(','):
+        params = {'Action': 'CreateSnapshot',
+                  'VolumeId': vol}
+
+        data.append(query(params, return_root=True))
+
+    return data
+
+
 def create_keypair(kwargs=None, call=None):
     '''
     Create an SSH keypair
