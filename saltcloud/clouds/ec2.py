@@ -1881,7 +1881,7 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
 
 def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     '''
-    Create a snapshot of a volume
+    Create a snapshot of a volume or comma-separated list of volumes
     '''
     if not kwargs:
         kwargs = {}
@@ -1890,10 +1890,15 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
         log.error('A volume_id is required.')
 	return False
 
-    params = {'Action': 'CreateSnapshot',
-              'VolumeId': kwargs['volume_id']}
+    data = []
 
-    data = query(params, return_root=True)
+    for vol in kwargs['volume_id'].split(','):
+        print vol
+	params = {'Action': 'CreateSnapshot',
+                  'VolumeId': vol}
+
+        data += query(params, return_root=True)
+
     return data
 
 
