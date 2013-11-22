@@ -1897,7 +1897,7 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
 	params = {'Action': 'CreateSnapshot',
                   'VolumeId': vol}
 
-        data += query(params, return_root=True)
+        data.append(query(params, return_root=True))
 
     return data
 
