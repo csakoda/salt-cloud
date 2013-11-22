@@ -1893,8 +1893,7 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     data = []
 
     for vol in kwargs['volume_id'].split(','):
-        print vol
-	params = {'Action': 'CreateSnapshot',
+        params = {'Action': 'CreateSnapshot',
                   'VolumeId': vol}
 
         data.append(query(params, return_root=True))
