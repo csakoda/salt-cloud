@@ -1901,6 +1901,32 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     return data
 
 
+def snap_and_attach(name=None, kwargs=None, instance_id=None, call=None):
+    '''
+    Create a snapshot, restore it into a volume, and attach it
+    '''
+    # First create the snapshot:
+    snapshot = create_snapshot(name, kwargs, instance_id, call)
+    # The output is not one dict, but a bunch of dicts in a list:
+    for i in snapshot[0]:
+        if 'snapshotId' in i:
+            kwargs['snapshot'] = i['snapshotId']
+    
+    # Next, restore the snapshot into a volume:
+    print call
+    print kwargs['zone']
+    raw_input()
+    volume = create_volume(kwargs, 'function')
+    for i in volume:
+        if 'volumeId' in i:
+            kwargs['volume'] = i['volumeId']
+    print kwargs
+    raw_input()
+
+    # Finally, attach the volume:
+    return attach_volume(name, kwargs, instance_id, 'action')
+
+
 def create_keypair(kwargs=None, call=None):
     '''
     Create an SSH keypair
