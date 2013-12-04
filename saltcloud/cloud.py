@@ -936,6 +936,16 @@ class Cloud(object):
 
         return ret
 
+    def snap_and_attach(self, source, target, devices):
+        '''
+        Take snapshots of volumes attached to a source machine
+        and then attach volumes restored from those snapshots to
+        a target machine.
+        '''
+        # Get a list of the EBS volume IDs of the listed devices:
+        self.opts['action'] = 'describe_instance'
+        description = self.do_action([source], {})
+        return description
 
     def do_action(self, names, kwargs):
         '''
