@@ -942,10 +942,34 @@ class Cloud(object):
         and then attach volumes restored from those snapshots to
         a target machine.
         '''
+        # Lambda for digging down to the instance:
+        dig = lambda readout, name: readout.values()[0].values()[0][name]
         # Get a list of the EBS volume IDs of the listed devices:
-        self.opts['action'] = 'describe_instance'
-        description = self.do_action([source], {})
-        return description
+        self.opts['action'] = 'get_block_device_mapping'
+        block_devices = self.do_action([source], {})
+        # Salt cloud buries its results pretty deep:
+        block_devices = dig(block_devices, source)
+        for i in block_devices:
+            if 'item' in i:
+                block_devices = i['item']
+        # Convert this list into one nice dict:
+        source_vols = {} # Like {'/dev/sda': 'vol-123456'}
+        for dev in block_devices:
+            device_name = dev['deviceName']
+            source_vols[device_name] = dev['ebs']['volumeId']
+
+        # Make a snapshot for each device:
+        source_snaps = {}
+        self.opts['action'] = 'create_snapshot'
+        for dev in devices:
+            vol = source_vols[dev[0]]
+            snapshot = self.do_action([source], {'volume_id': vol})
+            snapshot = dig(snapshot, source)
+            for i in snapshot[0]:
+                if 'snapshotId' in i:
+                    source_snaps[dev[0]] = i['snapshotId']
+        print source_snaps
+        return ['hello']
 
     def do_action(self, names, kwargs):
         '''

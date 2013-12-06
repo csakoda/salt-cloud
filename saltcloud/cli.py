@@ -299,10 +299,13 @@ class SaltCloud(parsers.SaltCloudParser):
                 msg = 'There was a profile error: {0}'
                 self.handle_exception(msg, exc)
         elif self.options.snapattach:
+            devices = []
+            for i in self.options.snapattach[2].split(','):
+                devices.append(tuple(i.split(':')))
             ret = mapper.snap_and_attach(
                 self.options.snapattach[0],
                 self.options.snapattach[1],
-                self.options.snapattach[2].split(',')
+                devices
             )
         elif self.config.get('map', None) and \
                 self.selected_query_option is None:
