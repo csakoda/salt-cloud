@@ -944,6 +944,16 @@ class Cloud(object):
         '''
         # Lambda for digging down to the instance:
         dig = lambda readout, name: readout.values()[0].values()[0][name]
+
+        # Grab the availability zone of the target instance:
+        self.opts['action'] = 'describe_instance'
+        target_desc = dig(self.do_action([target], {}), target)
+        for i in target_desc:
+            if 'item' in i:
+                zone = i['item']['instancesSet']['item']['placement']\
+                        ['availabilityZone']
+        print zone
+        return ['hello']
         # Get a list of the EBS volume IDs of the listed devices:
         self.opts['action'] = 'get_block_device_mapping'
         block_devices = self.do_action([source], {})
@@ -968,7 +978,16 @@ class Cloud(object):
             for i in snapshot[0]:
                 if 'snapshotId' in i:
                     source_snaps[dev[0]] = i['snapshotId']
-        print source_snaps
+        
+        # Restore the snapshots into the destination instance:
+        target_volumes = []
+        for dev in devices:
+            target_volumes.append({
+                'device': dev[1],
+                'snapshot': source_snaps[dev[0]]
+            })
+        self.opts['action'] = 'create_attach_volumes'
+        #self.do_action([target], {'volumes': target_volumes, 
         return ['hello']
 
     def do_action(self, names, kwargs):
