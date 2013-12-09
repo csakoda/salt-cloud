@@ -952,8 +952,6 @@ class Cloud(object):
             if 'item' in i:
                 zone = i['item']['instancesSet']['item']['placement']\
                         ['availabilityZone']
-        print zone
-        return ['hello']
         # Get a list of the EBS volume IDs of the listed devices:
         self.opts['action'] = 'get_block_device_mapping'
         block_devices = self.do_action([source], {})
@@ -987,8 +985,11 @@ class Cloud(object):
                 'snapshot': source_snaps[dev[0]]
             })
         self.opts['action'] = 'create_attach_volumes'
-        #self.do_action([target], {'volumes': target_volumes, 
-        return ['hello']
+        kwargs = {
+            'volumes': target_volumes,
+            'zone': zone
+        }
+        return self.do_action([target], kwargs)
 
     def do_action(self, names, kwargs):
         '''
