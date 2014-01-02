@@ -1901,6 +1901,22 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     return data
 
 
+def get_block_device_mapping(name=None, kwargs=None, instance_id=None,
+                             call=None):
+    '''
+    Return the block device mapping on an instance
+    '''
+    if not instance_id:
+        instances = list_nodes_full()
+        instance_id = instances[name]['instanceId']
+
+    params = {'Action': 'DescribeInstanceAttribute',
+              'InstanceId': instance_id,
+              'Attribute': 'blockDeviceMapping'}
+
+    return query(params, return_root=True)
+
+
 def create_keypair(kwargs=None, call=None):
     '''
     Create an SSH keypair
