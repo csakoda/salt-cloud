@@ -298,6 +298,15 @@ class SaltCloud(parsers.SaltCloudParser):
             except (SaltCloudException, Exception) as exc:
                 msg = 'There was a profile error: {0}'
                 self.handle_exception(msg, exc)
+        elif self.options.lbprofile and self.config.get('names', False):
+            try:
+                ret = mapper.run_lb_profile(
+                    self.options.lbprofile,
+                    self.config.get('names')
+                )
+            except (SaltCloudException, Exception) as exc:
+                msg = 'There was a profile error: {0}'
+                self.handle_exception(msg, exc)
         elif self.options.snapattach:
             devices = []
             for i in self.options.snapattach[2].split(','):

@@ -162,6 +162,11 @@ class ExecutionOptionsMixIn(object):
             help='Create a VPC using the specified profile.'
         )
         group.add_option(
+            '-b', '--lbprofile',
+            default=None,
+            help='Create a Load Balancer using the specified profile.'
+        )
+        group.add_option(
             '-s', '--snapattach',
             nargs=3,
             default=None,
