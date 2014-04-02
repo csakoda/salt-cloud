@@ -287,6 +287,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         )
         root = ET.fromstring(exc.read())
         data = _xml_to_dict(root)
+        print data
         if return_url is True:
             return {'error': data}, requesturl
         return {'error': data}
@@ -624,17 +625,79 @@ def get_subnetid(vm_):
     )
     if subnetid is None:
         return None
+    if not subnetid.startswith('subnet-'):
+        # try to dereference in vpc
+        subnetid = _deref_subnetname(subnetid, vm_)
     return subnetid
 
+def _deref_subnetname(subnet_name, vm_=None):
+    vpcid = config.get_config_value(
+        'vpcid', vm_, __opts__, search_global=False)
+    vpcname = _get_vpcname(describe_vpc({ 'vpc-id': vpcid }, call='function'))
+    if vpcid is None:
+        return None
+    else:
+        params = { 'vpc-id': vpcid,
+                   'subnet-name':  '{0}-{1}'.format(vpcname, subnet_name) }
+        subnet = describe_subnet(params, call='function')
+        if 'item' in subnet[1]:
+            subnetid = subnet[1]['item']['subnetId']
+        else:
+            raise SaltCloudException(
+                'Could not find subnet tagged with Name {0}-{1} in {2}'.format(vpcname, 
+                                                                               subnet_name,
+                                                                               vpcid))
+                                     
+        return subnetid
+
+def _get_vpcname(vpc_data):
+    tags = vpc_data[1]['item']['tagSet']
+    if not isinstance(tags, list):
+        if tags['item']['key'] == 'Name':
+            return tags['item']['value']
+    else:
+        for tag in tags:
+            if tag['item']['key'] == 'Name':
+                return tag['item']['value']
+    return None
 
 def securitygroupid(vm_):
     '''
     Returns the SecurityGroupId
     '''
-    return config.get_config_value(
+    securitygroupid = config.get_config_value(
         'securitygroupid', vm_, __opts__, search_global=False
     )
 
+    if securitygroupid:
+        if isinstance(securitygroupid, str) and not securitygroupid.startswith('sg-'):
+            return _deref_securitygroupname(securitygroupid, vm_)
+        elif isinstance(securitygroupid, list):
+            sg_deref = []
+            for (counter, sg_) in enumerate(securitygroupid):
+                if not sg_.startswith('sg-'):
+                    sg_deref.append(_deref_securitygroupname(sg_, vm_))
+                else:
+                    sg_deref.append(sg_)
+            return sg_deref
+    return securitygroupid
+
+def _deref_securitygroupname(sg_name, vm_=None):
+    vpcid = config.get_config_value(
+        'vpcid', vm_, __opts__, search_global=False
+        )
+    vpc = describe_vpc({ 'vpc-id': vpcid }, call='function')
+    vpcname = _get_vpcname(vpc)
+    params = { 'vpc-id': vpcid }
+    params['group-name'] = '{0}-{1}'.format(vpcname, sg_name)
+    sg_data = describe_sg(params, call='function')
+    if 'item' in sg_data[1]:
+        return sg_data[1]['item']['groupId']
+    else:
+        raise SaltCloudException(
+            'Could not find security group named {0}-{1} in {2}'.format(vpcname,
+                                                                        sg_name,
+                                                                        vpcid))
 
 def list_availability_zones():
     '''
@@ -1916,6 +1979,44 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
     return data
 
 
+def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
+    '''
+    Create a snapshot of a volume or comma-separated list of volumes
+    '''
+    if not kwargs:
+        kwargs = {}
+
+    if 'volume_id' not in kwargs:
+        log.error('A volume_id is required.')
+	return False
+
+    data = []
+
+    for vol in kwargs['volume_id'].split(','):
+        params = {'Action': 'CreateSnapshot',
+                  'VolumeId': vol}
+
+        data.append(query(params, return_root=True))
+
+    return data
+
+
+def get_block_device_mapping(name=None, kwargs=None, instance_id=None,
+                             call=None):
+    '''
+    Return the block device mapping on an instance
+    '''
+    if not instance_id:
+        instances = list_nodes_full()
+        instance_id = instances[name]['instanceId']
+
+    params = {'Action': 'DescribeInstanceAttribute',
+              'InstanceId': instance_id,
+              'Attribute': 'blockDeviceMapping'}
+
+    return query(params, return_root=True)
+
+
 def create_keypair(kwargs=None, call=None):
     '''
     Create an SSH keypair
@@ -2020,7 +2121,7 @@ def create_elb(kwargs=None, call=None):
 
     if 'zones' not in kwargs and 'subnets' not in kwargs:
         log.error('At least one Availability Zone or SubnetId is required.')
-        return False
+#        return False
 
     if 'listeners' not in kwargs:
         log.error('At least one Listener is required.')
@@ -2051,15 +2152,14 @@ def create_elb(kwargs=None, call=None):
         listeners = kwargs['listeners']
     for index in range(0, len(listeners)):
         listener = listeners[index]
-        if 'protocol' in listener and 'instance-port' in listener and 'lb-port' in listener:
-            params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['protocol']
+        if 'lb-protocol' in listener and 'instance-port' in listener and 'lb-port' in listener and 'instance-protocol' in listener:
+            params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['lb-protocol']
             params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
+            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['instance-protocol']
             params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
         else:
-            log.error('protocol, instance-port, lb-port are required parameters')
+            log.error('lb-protocol, instance-port, lb-port, instance-protocol are required parameters')
             return False
-        if 'instance-protocol' in listener: 
-            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['instance-protocol']
         if 'cert-id' in listener:
             params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
     # Subnets and Security groups only required for VPC?
@@ -2072,7 +2172,11 @@ def create_elb(kwargs=None, call=None):
         else:
             securitygroups = kwargs['securitygroups']
         for index in range(0, len(securitygroups)):
-            params['SecurityGroups.member.' + str(index+1)] = securitygroups[index]
+            if not securitygroups[index].startswith('sg-'):
+                securitygroupid = _deref_securitygroupname(securitygroups[index], kwargs)
+            else:
+                securitygroupid = securitygroups[index]
+            params['SecurityGroups.member.' + str(index+1)] = securitygroupid
 
     # Subnets
     if 'subnets' in kwargs:
@@ -2081,7 +2185,11 @@ def create_elb(kwargs=None, call=None):
         else:
             subnets = kwargs['subnets']
         for index in range(0, len(subnets)):
-            params['Subnets.member.' + str(index+1)] = subnets[index]
+            if not subnets[index].startswith('subnet-'):
+                subnetid = _deref_subnetname(subnets[index], kwargs)
+            else:
+                subnetid = subnets[index]
+            params['Subnets.member.' + str(index+1)] = subnetid
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
@@ -2191,6 +2299,62 @@ def create_vpc(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
+
+def describe_vpc(kwargs=None, call=None):
+    '''
+    Describe a Virtual Private Cloud
+    '''
+    if call != 'function':
+        log.error(
+            'The describe_vpc function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+        
+    params = {'Action': 'DescribeVpcs',
+              'VpcId.1': kwargs['vpc-id']
+              }
+
+    data = query(params, return_root=True)
+    return data
+
+def describe_subnet(kwargs=None, call=None):
+    '''
+    Describe a single subnet within a VPC identified by name
+    '''
+    if call != 'function':
+        log.error(
+            'The describe_subnet function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    if 'subnet-name' not in kwargs:
+        log.error('subnet-name must be specified.')
+        return False
+
+    params = {'Action': 'DescribeSubnets',
+              'Filter.1.Name': 'vpc-id',
+              'Filter.1.Value.1': kwargs['vpc-id'],
+              'Filter.2.Name': 'tag:Name',
+              'Filter.2.Value.1': kwargs['subnet-name'],
+              }
+
+    data = query(params, return_root=True)
+    return data
+
 
 def create_subnet(kwargs=None, call=None):
     '''
@@ -2419,6 +2583,37 @@ def attach_eip(kwargs=None, call=None):
 
     if 'allow-reassociation' in kwargs:
         params['AllowReassociation'] = kwargs['allow-reassociation']
+
+    data = query(params, return_root=True)
+    return data
+
+def describe_sg(kwargs=None, call=None):
+    '''
+    Describe a security group by name in a VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The describe_sg function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    if 'group-name' not in kwargs:
+        log.error('group-name must be specified.')
+        return False
+
+    params = {'Action': 'DescribeSecurityGroups',
+              'Filter.1.Name': 'vpc-id',
+              'Filter.1.Value.1': kwargs['vpc-id'],
+              'Filter.2.Name': 'group-name',
+              'Filter.2.Value.1': kwargs['group-name']
+              }
 
     data = query(params, return_root=True)
     return data

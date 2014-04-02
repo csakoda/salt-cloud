@@ -161,7 +161,20 @@ class ExecutionOptionsMixIn(object):
             default=None,
             help='Create a VPC using the specified profile.'
         )
-
+        group.add_option(
+            '-b', '--lbprofile',
+            default=None,
+            help='Create a Load Balancer using the specified profile.'
+        )
+        group.add_option(
+            '-s', '--snapattach',
+            nargs=3,
+            default=None,
+            metavar='<SOURCEMACHINE> <TARGETMACHINE> <DEVICES>',
+            help='Clone the comma-separated list of devices from the instance'\
+                 ' with the name <SOURCEMACHINE> to the instance with the'\
+                 ' name <TARGETMACHINE>.'
+        )
         group.add_option(
             '-m', '--map',
             default=None,
