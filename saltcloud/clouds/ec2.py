@@ -963,7 +963,7 @@ def create_attach_volumes(name, kwargs, call=None):
     '''
     if call != 'action':
         raise SaltCloudSystemExit(
-            'The set_tags action must be called with -a or --action.'
+            'The create_attach_volumes action must be called with -a or --action.'
         )
 
     if not 'instance_id' in kwargs:
@@ -1050,6 +1050,43 @@ def create_attach_volumes(name, kwargs, call=None):
 
     return ret
 
+def create_attach_volumes_quick(name, kwargs, call=None):
+    '''
+    Create and attach volumes to created node
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The create_attach_volumes_quick action must be called with -a or --action.'
+        )
+
+    if not 'drive_letters' in kwargs:
+        log.error('drive_letters must be specified')
+        return False
+
+    if not 'size' in kwargs:
+        log.error('size must be specified')
+        return False        
+
+    volumes = []
+    for letter in kwargs['drive_letters']:
+        volume = {}
+        volume['size'] = kwargs['size']
+        volume['device'] = '/dev/sd' + letter
+        volumes.append(volume)
+        
+    instance = _get_node(name)
+
+    return create_attach_volumes(name,
+                                {
+                                    'volumes': volumes,
+                                    'instance_id': instance['instanceId'],
+                                    'zone': instance['placement']['availabilityZone']
+                                },
+                                call='action'
+                            )
+    
+    
+    
 
 def stop(name, call=None):
     '''
