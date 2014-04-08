@@ -244,7 +244,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         elif endpoint_provider == 'elb':
             endpoint = provider.get(
                 'elb_endpoint',
-                'elasticloadbalancing.amazonaws.com'
+                'elasticloadbalancing.{0}.{1}'.format(location, service_url)
             )            
         else:
             log.error(
@@ -2157,8 +2157,13 @@ def create_elb(kwargs=None, call=None):
             params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
             params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['instance-protocol']
             params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
+        elif 'protocol' in listener and 'instance-port' in listener and 'lb-port' in listener:
+            params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['protocol']
+            params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
+            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['protocol']
+            params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
         else:
-            log.error('lb-protocol, instance-port, lb-port, instance-protocol are required parameters')
+            log.error('nstance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
             return False
         if 'cert-id' in listener:
             params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']

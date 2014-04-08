@@ -968,8 +968,6 @@ class Cloud(object):
             create_elb = '{0}.create_elb'.format(driver)
             configure_elb_healthcheck = '{0}.configure_elb_healthcheck'.format(driver)
             with CloudProviderContext(self.clouds[create_elb], alias, driver):
-#                lb_['subnets'] = [vpc_['subnets'][subnet]['subnet-id'] for subnet in lb_['subnets']]
-#                lb_['securitygroups'] = [vpc_['securitygroups'][group]['group-id'] for group in elb['securitygroups']]
                 lb_['loadbalancername'] = lb_['name']
                 output = self.clouds[create_elb](lb_, call='function')
                 if 'error' in output:
@@ -978,7 +976,7 @@ class Cloud(object):
                 log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(lb_['name'], lb_['dns-name']))
                 if 'healthcheck' in lb_:
                     check = lb_['healthcheck'].copy()
-                    check['loadbalancername'] = lb['name']
+                    check['loadbalancername'] = lb_['name']
                     output = self.clouds[configure_elb_healthcheck](check, call='function')
                     if 'error' in output:
                         return output['error']    
