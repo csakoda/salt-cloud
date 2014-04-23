@@ -293,7 +293,8 @@ class SaltCloud(parsers.SaltCloudParser):
             try:
                 ret = mapper.run_vpc_profile(
                     self.options.vpcprofile,
-                    self.config.get('names')
+                    self.config.get('names'),
+                    self.options.securitygroups
                 )
             except (SaltCloudException, Exception) as exc:
                 msg = 'There was a profile error: {0}'

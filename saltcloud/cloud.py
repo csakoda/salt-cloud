@@ -736,37 +736,8 @@ class Cloud(object):
                     log.info('Set tag {0} for {1}'.format(vpc_subnet_name,
                                                           subnet['subnet-id']))
 
-            create_sg = '{0}.create_sg'.format(driver)
-            create_ingress_rule = '{0}.create_ingress_rule'.format(driver)
-            create_egress_rule = '{0}.create_egress_rule'.format(driver)
-            with CloudProviderContext(self.clouds[create_sg], alias, driver):
-                for sg_name in vpc_['securitygroups']:
-                    sg = vpc_['securitygroups'][sg_name]
-                    sg['group-name'] = '{0}-{1}'.format(vpc_['name'], sg_name)
-                    sg['vpc-id'] = vpc_['vpc-id']
-                    output = self.clouds[create_sg](sg, call='function')
-                    if 'error' in output:
-                        return output['error']
-                    sg['group-id'] = output[2]['groupId']
-                    log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
-                                                                            sg['vpc-id']))
-                    time.sleep(3) # TODO make into a proper API based wait
-                    if 'inbound-rules' in sg:
-                        rules = { 'group-id': sg['group-id'], 'rules': sg['inbound-rules'] }
-                        output = self.clouds[create_ingress_rule](rules, call='function')
-                        if 'error' in output:
-                            return output['error']
-                        log.info('Created inbound rule {0!r} in security group {1}'.format(rules['rules'],
-                                                                                           rules['group-id']))
-                    if 'outbound-rules' in sg:
-                        rules = { 'group-id': sg['group-id'], 'rules': sg['outbound-rules'] }
-                        output = self.clouds[create_egress_rule](rules, call='function')
-                        if 'error' in output:
-                            return output['error']
-                        log.info('Created outbound rule {0!r} in security group {1}'.format(rules['rules'],
-                                                                                            rules['group-id']))
+            self.create_vpc_securitygroups(vpc_, local_master)
                    
-
             create_routetable = '{0}.create_routetable'.format(driver)
             create_route = '{0}.create_route'.format(driver)
             create_igw = '{0}.create_igw'.format(driver)
@@ -901,7 +872,7 @@ class Cloud(object):
                 )
             )
 
-    def run_vpc_profile(self, profile, names):
+    def run_vpc_profile(self, profile, names, securitygroups):
         '''
         Parse over the options passed on the command line and determine how to
         handle them
@@ -939,7 +910,10 @@ class Cloud(object):
         try:
             # No need to use CloudProviderContext here because self.create
             # takes care of that
-            ret[name] = self.create_vpc(vpc_)
+            if securitygroups:
+                ret[name] = self.create_vpc_securitygroups(vpc_)
+            else:
+                ret[name] = self.create_vpc(vpc_)
         except (SaltCloudSystemExit, SaltCloudConfigError), exc:
             ret[name] = {'Error': exc.message}
 
@@ -988,6 +962,57 @@ class Cloud(object):
                     lb_['name'], exc
                 )
             )
+
+    def create_vpc_securitygroups(self, vpc_, local_master=True):
+        alias, driver = vpc_['provider'].split(':')
+        create_sg = '{0}.create_sg'.format(driver)
+        create_ingress_rule = '{0}.create_ingress_rule'.format(driver)
+        create_egress_rule = '{0}.create_egress_rule'.format(driver)
+        get_vpcname = '{0}.get_vpcname'.format(driver)
+
+        with CloudProviderContext(self.clouds[create_sg], alias, driver):
+            if 'vpc-id' not in vpc_:
+                vpcid = config.get_config_value(
+                    'vpcid', vpc_, self.opts, search_global=False
+                    )
+                vpcname = self.clouds[get_vpcname](vpcid, call='function')
+            else:
+                vpcid = vpc_['vpc-id']
+                vpcname = vpc_['name']
+
+            for sg_name in vpc_['securitygroups']:
+                sg = vpc_['securitygroups'][sg_name]
+                sg['group-name'] = '{0}-{1}'.format(vpcname, sg_name)
+                sg['vpc-id'] = vpcid
+                output = self.clouds[create_sg](sg, call='function')
+                if 'error' in output:
+                    try:
+                        if 'already exists' in output['error']['Errors']['Error']['Message']:
+                            log.info('Security group {0} already exists in {1}'.format(sg['group-name'],
+                                                                                       sg['vpc-id']))
+                            continue
+                        else:
+                            return output['error']
+                    except:
+                        return output['error']
+                sg['group-id'] = output[2]['groupId']
+                log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
+                                                                        sg['vpc-id']))
+                time.sleep(3) # TODO make into a proper API based wait
+                if 'inbound-rules' in sg:
+                    rules = { 'group-id': sg['group-id'], 'rules': sg['inbound-rules'] }
+                    output = self.clouds[create_ingress_rule](rules, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    log.info('Created inbound rule {0!r} in security group {1}'.format(rules['rules'],
+                                                                                       rules['group-id']))
+                if 'outbound-rules' in sg:
+                    rules = { 'group-id': sg['group-id'], 'rules': sg['outbound-rules'] }
+                    output = self.clouds[create_egress_rule](rules, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    log.info('Created outbound rule {0!r} in security group {1}'.format(rules['rules'],
+                                                                                        rules['group-id']))
 
 
 

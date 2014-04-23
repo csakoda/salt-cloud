@@ -630,6 +630,13 @@ def get_subnetid(vm_):
         subnetid = _deref_subnetname(subnetid, vm_)
     return subnetid
 
+def get_vpcname(vpcid, call=None):
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The get_vpcname function must be called with -f or --function.'
+        )
+    return _get_vpcname(describe_vpc({ 'vpc-id': vpcid }, call='function'))
+
 def _deref_subnetname(subnet_name, vm_=None):
     vpcid = config.get_config_value(
         'vpcid', vm_, __opts__, search_global=False)

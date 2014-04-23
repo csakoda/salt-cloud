@@ -162,6 +162,12 @@ class ExecutionOptionsMixIn(object):
             help='Create a VPC using the specified profile.'
         )
         group.add_option(
+            '--securitygroups',
+            default=False,
+            action='store_true',
+            help='Create the security groups of the VPC using the specified profile.'
+        )
+        group.add_option(
             '-b', '--lbprofile',
             default=None,
             help='Create a Load Balancer using the specified profile.'
