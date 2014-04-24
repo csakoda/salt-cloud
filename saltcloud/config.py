@@ -864,13 +864,8 @@ def apply_vpc_profiles_config(providers, overrides, defaults=None):
             vms.pop(profile)
             continue
 
-        extended = vms.get(extends).copy()
-        extended.pop('profile')
-        for key in details:
-            if key in extended and isinstance(extended[key], dict):
-                extended[key].update(details[key])
-            else:
-                extended[key] = details[key]
+        extended = _get_extended_details(vms, extends)
+        extended.update(details)
 
         if ':' not in extended['provider']:
             if extended['provider'] not in providers:
@@ -1015,13 +1010,8 @@ def apply_lb_profiles_config(providers, overrides, defaults=None):
             vms.pop(profile)
             continue
 
-        extended = vms.get(extends).copy()
-        extended.pop('profile')
-        for key in details:
-            if key in extended and isinstance(extended[key], dict):
-                extended[key].update(details[key])
-            else:
-                extended[key] = details[key]
+        extended = _get_extended_details(vms, extends)
+        extended.update(details)
 
         if ':' not in extended['provider']:
             if extended['provider'] not in providers:

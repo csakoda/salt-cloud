@@ -893,8 +893,6 @@ class Cloud(object):
         #mapped_providers = self.map_providers_parallel()
         #alias_data = mapped_providers.setdefault(alias, {})
         #vms = alias_data.setdefault(driver, {})
-        from pprint import pprint
-        pprint(profile_details)
         
         #for name in names:
         #     if name in vms and vms[name]['state'].lower() != 'terminated':
@@ -923,8 +921,6 @@ class Cloud(object):
         '''
         Create a single load balancer
         '''
-        output = {}
-
         alias, driver = lb_['provider'].split(':')
         required_funcs = [ '{0}.create_elb'.format(driver), '{0}.configure_elb_healthcheck'.format(driver) ]
         for fun in required_funcs:
@@ -955,6 +951,7 @@ class Cloud(object):
                     if 'error' in output:
                         return output['error']    
                     log.info('Configured healthcheck for Elastic Load Balancer ' + lb_['name'])
+                return { 'dns-name': lb_['dns-name'], 'result': True }
         except KeyError as exc:
             log.exception(
                 'Failed to create Load Balancer {0}. Configuration value {1} needs '
@@ -1037,8 +1034,6 @@ class Cloud(object):
         #mapped_providers = self.map_providers_parallel()
         #alias_data = mapped_providers.setdefault(alias, {})
         #vms = alias_data.setdefault(driver, {})
-        from pprint import pprint
-        pprint(profile_details)
         
         #for name in names:
         #     if name in vms and vms[name]['state'].lower() != 'terminated':
@@ -1054,9 +1049,9 @@ class Cloud(object):
         try:
             # No need to use CloudProviderContext here because self.create
             # takes care of that
-            lb_[name] = self.create_lb(lb_)
+            ret[name] = self.create_lb(lb_)
         except (SaltCloudSystemExit, SaltCloudConfigError), exc:
-            lb_[name] = {'Error': exc.message}
+            ret[name] = {'Error': exc.message}
 
         return ret
 
