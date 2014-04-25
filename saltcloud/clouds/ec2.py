@@ -2206,31 +2206,26 @@ def create_elb(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
 
-def attach_elb(kwargs=None, call=None):
+def attach_elb(name, kwargs=None, call=None):
     '''
     Create an Elastic Load Balancer
     '''
-    if call != 'function':
-        log.error(
-            'The create_elb function must be called with -f or --function.'
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The create_attach_volumes action must be called with -a or --action.'
         )
-        return False
-
     if not kwargs:
         kwargs = {}
-
-    if 'instances' not in kwargs:
-        log.error('At least one instance id is required.')
+    
+    instance_id = _get_node(name)['instanceId']
+    if not 'lb-name' in kwargs:
+        log.error('You must specific a lb-name to attach to')
         return False
 
     params = {'Action': 'RegisterInstancesWithLoadBalancer',
-              'LoadBalancerName': kwargs['loadbalancername']
+              'LoadBalancerName': kwargs['lb-name'],
+              'Instances.member.1.InstanceId': instance_id
               }
-
-    # Instances.member.N instances=i-184dbd7b;i-b6d5b9dc
-    instances = kwargs['instances'].split(';')
-    for index in range(0, len(instances)):
-        params['Instances.member.{0}.InstanceId'.format(index+1)] = instances[index]
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
