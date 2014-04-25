@@ -2178,11 +2178,13 @@ def create_elb(kwargs=None, call=None):
             params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['protocol']
             params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
         else:
-            log.error('nstance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
+            log.error('instance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
             return False
-        if 'cert-id' in listener:
-            cert_id = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == listener['cert-id'] ][0]
+        if 'cert-name' in listener:
+            cert_id = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == listener['cert-name'] ][0]
             params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = cert_id
+        if 'cert-id' in listener:
+            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
     # Subnets and Security groups only required for VPC?
 
     # SecurityGroups
