@@ -236,6 +236,8 @@ def query(params=None, setname=None, requesturl=None, location=None,
     if not requesturl:
         method = 'GET'
 
+        params['Version'] = '2012-06-01'
+
         if endpoint_provider == 'ec2':
             endpoint = provider.get(
                 'endpoint',
@@ -246,6 +248,12 @@ def query(params=None, setname=None, requesturl=None, location=None,
                 'elb_endpoint',
                 'elasticloadbalancing.{0}.{1}'.format(location, service_url)
             )            
+        elif endpoint_provider == 'iam': 
+            endpoint = provider.get(
+                'iam_endpoint',
+                'iam.amazonaws.com'
+            )
+            params['Version'] = '2010-05-08' 
         else:
             log.error(
                 'Unknown endpoint_provider: ' + endpoint_provider
@@ -255,7 +263,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         params['SignatureVersion'] = '2'
         params['SignatureMethod'] = 'HmacSHA256'
         params['Timestamp'] = '{0}'.format(timestamp)
-        params['Version'] = '2012-06-01'
+        
         keys = sorted(params.keys())
         values = map(params.get, keys)
         querystring = urllib.urlencode(list(zip(keys, values)))
@@ -2173,7 +2181,8 @@ def create_elb(kwargs=None, call=None):
             log.error('nstance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
             return False
         if 'cert-id' in listener:
-            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
+            cert_id = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == listener['cert-id'] ][0]
+            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = cert_id
     # Subnets and Security groups only required for VPC?
 
     # SecurityGroups
@@ -2714,6 +2723,24 @@ def create_egress_rule(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
+
+def list_certificates(kwargs=None, call=None):
+    '''
+    List all cerficiates on an account
+    '''
+    if call != 'function':
+        log.error(
+            'The list_certificates function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    params = { 'Action': 'ListServerCertificates' }
+
+    data = query(params, return_root=True, endpoint_provider='iam')
+    return data[0]['ServerCertificateMetadataList']['member']
 
 def _parse_ip_permissions(kwargs = None, params = None):
     if not isinstance(kwargs, dict) or not isinstance(params, dict):
