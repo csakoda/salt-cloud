@@ -807,6 +807,19 @@ def create(vm_=None, call=None):
             set_delvol_on_destroy
         ).lower()
 
+    root_vol_size = config.get_config_value(
+        'root_vol_size', vm_, __opts__, search_global=False
+    )
+
+    if root_vol_size is not None:
+        if not isinstance(root_vol_size, int):
+            raise SaltCloudConfigError(
+                '\'root_vol_size\' should be a integer value.'
+            )
+
+        params['BlockDeviceMapping.1.DeviceName'] = '/dev/sda1'
+        params['BlockDeviceMapping.1.Ebs.VolumeSize'] = str(root_vol_size)
+
     # Get ANY defined volumes settings, merging data, in the following order
     # 1. VM config
     # 2. Profile config
