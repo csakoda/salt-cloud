@@ -2232,18 +2232,18 @@ def create_elb(kwargs=None, call=None):
 
 def attach_elb(name, kwargs=None, call=None):
     '''
-    Create an Elastic Load Balancer
+    Attach and instance to an Elastic Load Balancer
     '''
     if call != 'action':
         raise SaltCloudSystemExit(
-            'The create_attach_volumes action must be called with -a or --action.'
+            'The attach_elb action must be called with -a or --action.'
         )
     if not kwargs:
         kwargs = {}
     
     instance_id = _get_node(name)['instanceId']
     if not 'lb-name' in kwargs:
-        log.error('You must specific a lb-name to attach to')
+        log.error('You must specify a lb-name to attach to')
         return False
 
     params = {'Action': 'RegisterInstancesWithLoadBalancer',
@@ -2253,6 +2253,55 @@ def attach_elb(name, kwargs=None, call=None):
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
+
+def detach_elb(name, kwargs=None, call=None):
+    '''
+    Detach an instance from an Elastic Load Balancer
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The detach_elb action must be called with -a or --action.'
+        )
+    if not kwargs:
+        kwargs = {}
+    
+    instance_id = _get_node(name)['instanceId']
+    if not 'lb-name' in kwargs:
+        log.error('You must specify a lb-name to detach from')
+        return False
+
+    params = {'Action': 'DeregisterInstancesFromLoadBalancer',
+              'LoadBalancerName': kwargs['lb-name'],
+              'Instances.member.1.InstanceId': instance_id
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+def describe_elb_instance_health(kwargs=None, call=None):
+    '''
+    Describe the instance health of all instances on the Elastic Load Balancer
+    '''
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The describe_elb_instance_health action must be called with -f or --function.'
+        )
+    
+    if not kwargs:
+        kwargs = {}
+    
+    if not 'lb-name' in kwargs:
+        log.error('You must specify a lb-name to describe')
+        return False
+
+
+    params = {'Action': 'DescribeInstanceHealth',
+              'LoadBalancerName': kwargs['lb-name']
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
 
 def configure_elb_healthcheck(kwargs=None, call=None):
     '''
