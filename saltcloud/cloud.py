@@ -715,7 +715,7 @@ class Cloud(object):
                     return output['error']
                 vpc_['vpc-id'] = output[1]['vpcId']
                 log.info('Created VPC {0}'.format(vpc_['vpc-id']))
-                time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready 
+                time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready
                 output = self.clouds[set_tags](vpc_['name'], { 'Name': vpc_['name'] }, call='action', instance_id=vpc_['vpc-id'])
                 log.info('Set tag {0} for {1}'.format(vpc_['name'],
                                                       vpc_['vpc-id']))
@@ -737,7 +737,7 @@ class Cloud(object):
                                                           subnet['subnet-id']))
 
             self.create_vpc_securitygroups(vpc_, local_master)
-                   
+
             create_routetable = '{0}.create_routetable'.format(driver)
             create_route = '{0}.create_route'.format(driver)
             create_igw = '{0}.create_igw'.format(driver)
@@ -750,7 +750,7 @@ class Cloud(object):
             with CloudProviderContext(self.clouds[create_routetable], alias, driver):
                 # this is a limited implementation, needs minor refactor to support
                 # generalized routetables .. right now optimized for the basic private/public
-                # VPC setup covered here: 
+                # VPC setup covered here:
                 # http://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_NAT_Instance.html
                 for rtb_type in [ 'public_rtb', 'private_rtb' ]:
                     if rtb_type in vpc_['routetables']:
@@ -807,7 +807,7 @@ class Cloud(object):
                                     while True:
                                         output = self.clouds[describe_instance](instance_id=rtb['instance-id'], call='action')
                                         if 'error' in output:
-                                            return output['error'] 
+                                            return output['error']
                                         if output[1]['item']['instancesSet']['item']['instanceState']['name'] == 'running':
                                             break
                                         log.info('Waiting for NAT instance to be ready.  Checking again in 10 seconds.')
@@ -822,11 +822,11 @@ class Cloud(object):
                                     public_ip = output[1]['publicIp']
                                     log.info('Created Elastic IP {0}'.format(public_ip))
                                     output = self.clouds[attach_eip]({ 'allocation-id': output[3]['allocationId'],
-                                                                       'instance-id': rtb['instance-id']}, 
+                                                                       'instance-id': rtb['instance-id']},
                                                                      call='function')
                                     if 'error' in output:
-                                        return output['error'] 
-                                    log.info('Attached Elastic IP {0} to instance {1}'.format(public_ip, 
+                                        return output['error']
+                                    log.info('Attached Elastic IP {0} to instance {1}'.format(public_ip,
                                                                                               rtb['instance-id']))
                                 except (SaltCloudException, Exception) as exc:
                                     raise
@@ -847,23 +847,24 @@ class Cloud(object):
             create_elb = '{0}.create_elb'.format(driver)
             configure_elb_healthcheck = '{0}.configure_elb_healthcheck'.format(driver)
             with CloudProviderContext(self.clouds[create_elb], alias, driver):
-                for elb_name in vpc_['elb']:
-                    elb = vpc_['elb'][elb_name].copy()
-                    elb['subnets'] = [vpc_['subnets'][subnet]['subnet-id'] for subnet in elb['subnets']]
-                    elb['securitygroups'] = [vpc_['securitygroups'][group]['group-id'] for group in elb['securitygroups']]
-                    elb['loadbalancername'] = elb_name
-                    output = self.clouds[create_elb](elb, call='function')
-                    if 'error' in output:
-                        return output['error']
-                    vpc_['elb'][elb_name]['dns-name'] = output[0]['DNSName']
-                    log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(elb_name, vpc_['elb'][elb_name]['dns-name']))
-                    if 'healthcheck' in elb:
-                        check = elb['healthcheck'].copy()
-                        check['loadbalancername'] = elb_name
-                        output = self.clouds[configure_elb_healthcheck](check, call='function')
+                if 'elb' in vpc_:
+                    for elb_name in vpc_['elb']:
+                        elb = vpc_['elb'][elb_name].copy()
+                        elb['subnets'] = [vpc_['subnets'][subnet]['subnet-id'] for subnet in elb['subnets']]
+                        elb['securitygroups'] = [vpc_['securitygroups'][group]['group-id'] for group in elb['securitygroups']]
+                        elb['loadbalancername'] = elb_name
+                        output = self.clouds[create_elb](elb, call='function')
                         if 'error' in output:
-                            return output['error']    
-                        log.info('Configured healthcheck for Elastic Load Balancer ' + elb_name)
+                            return output['error']
+                        vpc_['elb'][elb_name]['dns-name'] = output[0]['DNSName']
+                        log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(elb_name, vpc_['elb'][elb_name]['dns-name']))
+                        if 'healthcheck' in elb:
+                            check = elb['healthcheck'].copy()
+                            check['loadbalancername'] = elb_name
+                            output = self.clouds[configure_elb_healthcheck](check, call='function')
+                            if 'error' in output:
+                                return output['error']
+                            log.info('Configured healthcheck for Elastic Load Balancer ' + elb_name)
         except KeyError as exc:
             log.exception(
                 'Failed to create VPC {0}. Configuration value {1} needs '
@@ -893,7 +894,7 @@ class Cloud(object):
         #mapped_providers = self.map_providers_parallel()
         #alias_data = mapped_providers.setdefault(alias, {})
         #vms = alias_data.setdefault(driver, {})
-        
+
         #for name in names:
         #     if name in vms and vms[name]['state'].lower() != 'terminated':
         #         msg = '{0} already exists under {0}:{1}'.format(
@@ -949,7 +950,7 @@ class Cloud(object):
                     check['loadbalancername'] = lb_['name']
                     output = self.clouds[configure_elb_healthcheck](check, call='function')
                     if 'error' in output:
-                        return output['error']    
+                        return output['error']
                     log.info('Configured healthcheck for Elastic Load Balancer ' + lb_['name'])
                 return { 'dns-name': lb_['dns-name'], 'result': True }
         except KeyError as exc:
@@ -1034,7 +1035,7 @@ class Cloud(object):
         #mapped_providers = self.map_providers_parallel()
         #alias_data = mapped_providers.setdefault(alias, {})
         #vms = alias_data.setdefault(driver, {})
-        
+
         #for name in names:
         #     if name in vms and vms[name]['state'].lower() != 'terminated':
         #         msg = '{0} already exists under {0}:{1}'.format(
@@ -1095,7 +1096,7 @@ class Cloud(object):
             for i in snapshot[0]:
                 if 'snapshotId' in i:
                     source_snaps[dev[0]] = i['snapshotId']
-        
+
         # Restore the snapshots into the destination instance:
         target_volumes = []
         for dev in devices:
