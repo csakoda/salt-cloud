@@ -878,7 +878,7 @@ def create(vm_=None, call=None):
                 )
             )
             attempts -= 1
-            sleep(5)
+            sleep(5 * (5-attempts))
             continue
 
         if isinstance(data, list) and not data:
@@ -889,7 +889,7 @@ def create(vm_=None, call=None):
                 )
             )
             attempts -= 1
-            sleep(5)
+            sleep(5 * (5-attempts))
             continue
 
         break
