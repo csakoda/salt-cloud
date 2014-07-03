@@ -878,7 +878,7 @@ def create(vm_=None, call=None):
                 )
             )
             attempts -= 1
-            sleep(1)
+            sleep(5)
             continue
 
         if isinstance(data, list) and not data:
@@ -889,7 +889,7 @@ def create(vm_=None, call=None):
                 )
             )
             attempts -= 1
-            sleep(1)
+            sleep(5)
             continue
 
         break
@@ -899,27 +899,37 @@ def create(vm_=None, call=None):
         )
 
     def __query_ip_address(params, url):
-        data = query(params, requesturl=url)
-        if not data:
-            log.error(
-                'There was an error while querying EC2. Empty response'
-            )
-            # Trigger a failure in the wait for IP function
-            return False
+        attempts = 5
+        while attempts > 0:
+            data = query(params, requesturl=url)
+            if not data:
+                log.error(
+                    'There was an error while querying EC2. Empty response'
+                    )
+                attempts -=1
+                sleep(5)
+                continue
 
-        if isinstance(data, dict) and 'error' in data:
-            log.warn(
-                'There was an error in the query. {0}'.format(data['error'])
-            )
-            # Trigger a failure in the wait for IP function
-            return False
+            if isinstance(data, dict) and 'error' in data:
+                log.warn(
+                    'There was an error in the query. {0}'.format(data['error'])
+                    )
+                attempts -=1
+                sleep(5)
+                continue
 
-        log.debug('Returned query data: {0}'.format(data))
+            # no errors => success
+            log.debug('Returned query data: {0}'.format(data))
 
-        if 'ipAddress' in data[0]['instancesSet']['item']:
-            return data
-        if 'privateIpAddress' in data[0]['instancesSet']['item']:
-            return data
+            if 'ipAddress' in data[0]['instancesSet']['item']:
+                return data
+            if 'privateIpAddress' in data[0]['instancesSet']['item']:
+                return data
+
+        # Trigger a failure in the wait for IP function
+        log.error('Could not find an IP address for {0}'.format(instance_id))
+        return False
+
 
     try:
         data = saltcloud.utils.wait_for_ip(
@@ -1112,7 +1122,7 @@ def create_attach_volumes(name, kwargs, call=None):
                     )
                 )
                 attempts -= 1
-		sleep(1)
+		sleep(5)
                 continue
 
             if isinstance(data, list) and not data:
@@ -1123,7 +1133,7 @@ def create_attach_volumes(name, kwargs, call=None):
                     )
                 )
                 attempts -= 1
-		sleep(1)
+		sleep(5)
                 continue
 
             # No errors, volume successfully attached
