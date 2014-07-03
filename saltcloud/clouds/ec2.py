@@ -904,18 +904,18 @@ def create(vm_=None, call=None):
             data = query(params, requesturl=url)
             if not data:
                 log.error(
-                    'There was an error while querying EC2. Empty response'
+                    'There was an error retrieving instance IP. Empty response'
                     )
                 attempts -=1
-                sleep(5)
+                sleep(5 * (5-attempts))
                 continue
 
             if isinstance(data, dict) and 'error' in data:
                 log.warn(
-                    'There was an error in the query. {0}'.format(data['error'])
+                    'There was an error retrieving instance IP. {0}'.format(data['error'])
                     )
                 attempts -=1
-                sleep(5)
+                sleep(5 * (5-attempts))
                 continue
 
             # no errors => success
@@ -1122,7 +1122,7 @@ def create_attach_volumes(name, kwargs, call=None):
                     )
                 )
                 attempts -= 1
-		sleep(5)
+		sleep(5 * (5-attempts))
                 continue
 
             if isinstance(data, list) and not data:
@@ -1133,7 +1133,7 @@ def create_attach_volumes(name, kwargs, call=None):
                     )
                 )
                 attempts -= 1
-		sleep(5)
+		sleep(5 * (5-attempts))
                 continue
 
             # No errors, volume successfully attached
