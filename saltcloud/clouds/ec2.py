@@ -236,6 +236,9 @@ def query(params=None, setname=None, requesturl=None, location=None,
     if not requesturl:
         method = 'GET'
 
+        # copy the params in case the same instance of params is queries many times
+        params = params.copy()
+
         params['Version'] = '2012-06-01'
 
         if endpoint_provider == 'ec2':
