@@ -865,7 +865,16 @@ def apply_vpc_profiles_config(providers, overrides, defaults=None):
             continue
 
         extended = _get_extended_details(vms, extends)
-        extended.update(details)
+        for item in details:
+            if isinstance(details[item], dict):
+                if item not in extended:
+                    extended[item] = details[item]
+                else:
+                    # merge the two dicts
+                    for inner_item in details[item]:
+                        extended[item][inner_item] = details[item][inner_item]
+            else:
+                extended[item] = details[item]
 
         if ':' not in extended['provider']:
             if extended['provider'] not in providers:
