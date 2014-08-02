@@ -686,6 +686,25 @@ class Cloud(object):
 
         return ret
 
+    def _get_tags(self, instance_id, driver):
+        get_tags = '{0}.get_tags'.format(driver)
+        tags = self.clouds[get_tags](call='action', instance_id=instance_id)
+        tags_dict = {}
+        for tag in tags:
+            tags_dict[tag['key']] = tag['value']
+        return tags_dict
+
+    def _set_tag(self, name, instance_id, driver):
+        set_tags = '{0}.set_tags'.format(driver)
+
+        self.clouds[set_tags](name, { 'Name': name }, call='action', instance_id=instance_id)
+        tags = self._get_tags(instance_id, driver)
+        while 'Name' not in tags or tags['Name'] != name:
+            self.clouds[set_tags](name, { 'Name': name }, call='action', instance_id=instance_id)
+            tags = self._get_tags(instance_id, driver)
+        log.info('Set tag {0} for {1}'.format(name,
+                                              instance_id))
+
     def create_vpc(self, vpc_, local_master=True):
         '''
         Create a single VPC
@@ -708,7 +727,6 @@ class Cloud(object):
         try:
             alias, driver = vpc_['provider'].split(':')
             create_vpc = '{0}.create_vpc'.format(driver)
-            set_tags = '{0}.set_tags'.format(driver)
             with CloudProviderContext(self.clouds[create_vpc], alias, driver):
                 output = self.clouds[create_vpc](vpc_, call='function')
                 if 'error' in output:
@@ -716,9 +734,7 @@ class Cloud(object):
                 vpc_['vpc-id'] = output[1]['vpcId']
                 log.info('Created VPC {0}'.format(vpc_['vpc-id']))
                 time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready
-                output = self.clouds[set_tags](vpc_['name'], { 'Name': vpc_['name'] }, call='action', instance_id=vpc_['vpc-id'])
-                log.info('Set tag {0} for {1}'.format(vpc_['name'],
-                                                      vpc_['vpc-id']))
+                self._set_tags(vpc_['name'], vpc_['vpc-id'], driver)
 
             create_subnet = '{0}.create_subnet'.format(driver)
             with CloudProviderContext(self.clouds[create_subnet], alias, driver):
@@ -732,9 +748,7 @@ class Cloud(object):
                     log.info('Created subnet {0} in VPC {1}'.format(subnet['subnet-id'],
                                                                     subnet['vpc-id']))
                     vpc_subnet_name = '{0}-{1}'.format(vpc_['name'], subnet_name)
-                    output = self.clouds[set_tags](subnet_name, { 'Name': vpc_subnet_name }, call='action', instance_id=subnet['subnet-id'])
-                    log.info('Set tag {0} for {1}'.format(vpc_subnet_name,
-                                                          subnet['subnet-id']))
+                    self._set_tags(subnet_name, subnet['subnet-id'], driver)
 
             self.create_vpc_securitygroups(vpc_, local_master)
 
