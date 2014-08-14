@@ -1080,6 +1080,9 @@ def create_attach_volumes(name, kwargs, call=None):
     else:
         volumes = kwargs['volumes']
 
+    if not 'zone' in kwargs:
+        kwargs['zone'] = _get_node(name)['placement']['availabilityZone']
+
     ret = []
     for volume in volumes:
         volume_name = '{0} on {1}'.format(volume['device'], name)
@@ -2021,6 +2024,8 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
     data = query(params, return_root=True)
     return data
 
+def list_snapshots(location=None):
+    pass
 
 def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     '''
