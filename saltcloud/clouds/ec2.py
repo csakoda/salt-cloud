@@ -240,6 +240,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         params = params.copy()
 
         params['Version'] = '2012-06-01'
+        params['SignatureVersion'] = '2'
 
         if endpoint_provider == 'ec2':
             endpoint = provider.get(
@@ -251,6 +252,14 @@ def query(params=None, setname=None, requesturl=None, location=None,
                 'elb_endpoint',
                 'elasticloadbalancing.{0}.{1}'.format(location, service_url)
             )
+        elif endpoint_provider == 'redshift':
+            endpoint = provider.get(
+                'redshift_endpoint',
+                'redshift.{0}.{1}'.format(location, service_url)
+            )
+            params['Version'] = '2012-12-01'
+            params['SignatureVersion'] = '4'
+            service = 'redshift'
         elif endpoint_provider == 'iam':
             endpoint = provider.get(
                 'iam_endpoint',
@@ -262,25 +271,66 @@ def query(params=None, setname=None, requesturl=None, location=None,
                 'Unknown endpoint_provider: ' + endpoint_provider
             )
 
-        params['AWSAccessKeyId'] = provider['id']
-        params['SignatureVersion'] = '2'
-        params['SignatureMethod'] = 'HmacSHA256'
-        params['Timestamp'] = '{0}'.format(timestamp)
+        if params['SignatureVersion'] == '4':
+            # adapted from http://docs.aws.amazon.com/general/latest/gr/sigv4-signed-request-examples.html
+            # Create a date for headers and the credential string
+            t = datetime.datetime.utcnow()
+            amz_date = t.strftime('%Y%m%dT%H%M%SZ') # Format date as YYYYMMDD'T'HHMMSS'Z'
+            datestamp = t.strftime('%Y%m%d') # Date w/o time, used in credential scope
 
-        keys = sorted(params.keys())
-        values = map(params.get, keys)
-        querystring = urllib.urlencode(list(zip(keys, values)))
+            canonical_uri = '/'
 
-        uri = '{0}\n{1}\n/\n{2}'.format(method.encode('utf-8'),
-                                        endpoint.encode('utf-8'),
-                                        querystring.encode('utf-8'))
+            canonical_headers = 'host:' + endpoint + '\n'
+            signed_headers = 'host'
 
-        hashed = hmac.new(provider['key'], uri, hashlib.sha256)
-        sig = binascii.b2a_base64(hashed.digest())
-        params['Signature'] = sig.strip()
+            algorithm = 'AWS4-HMAC-SHA256'
+            credential_scope = datestamp + '/' + location + '/' + service + '/' + 'aws4_request'
 
-        querystring = urllib.urlencode(params)
-        requesturl = 'https://{0}/?{1}'.format(endpoint, querystring)
+            keys = sorted(params.keys())
+            values = map(params.get, keys)
+            querystring = urllib.urlencode(list(zip(keys, values)))
+
+            canonical_querystring = querystring
+            canonical_querystring += '&X-Amz-Algorithm=AWS4-HMAC-SHA256'
+            canonical_querystring += '&X-Amz-Credential=' + urllib.quote_plus(provider['id'] + '/' + credential_scope)
+            canonical_querystring += '&X-Amz-Date=' + amz_date
+            canonical_querystring += '&X-Amz-Expires=30'
+            canonical_querystring += '&X-Amz-SignedHeaders=' + signed_headers
+
+            # Create payload hash. For GET requests, the payload is an
+            # empty string ("").
+            payload_hash = hashlib.sha256('').hexdigest()
+
+            canonical_request = method + '\n' + canonical_uri + '\n' + canonical_querystring + '\n' + canonical_headers + '\n' + signed_headers + '\n' + payload_hash
+            log.debug('Canonical Request: {0}'.format(canonical_request))
+
+            string_to_sign = algorithm + '\n' +  amz_date + '\n' +  credential_scope + '\n' +  hashlib.sha256(canonical_request).hexdigest()
+            log.debug('String-to-Sign: {0}'.format(string_to_sign))
+            signing_key = _getSignatureKey(provider['key'], datestamp, location, service)
+            signature = hmac.new(signing_key, (string_to_sign).encode("utf-8"), hashlib.sha256).hexdigest()
+            canonical_querystring += '&X-Amz-Signature=' + signature
+            log.debug('Canonical Querystring: {0}'.format(canonical_querystring))
+
+            requesturl = 'https://{0}/?{1}'.format(endpoint, canonical_querystring)
+        else:
+            params['AWSAccessKeyId'] = provider['id']
+            params['SignatureMethod'] = 'HmacSHA256'
+            params['Timestamp'] = '{0}'.format(timestamp)
+
+            keys = sorted(params.keys())
+            values = map(params.get, keys)
+            querystring = urllib.urlencode(list(zip(keys, values)))
+
+            uri = '{0}\n{1}\n/\n{2}'.format(method.encode('utf-8'),
+                                            endpoint.encode('utf-8'),
+                                            querystring.encode('utf-8'))
+
+            hashed = hmac.new(provider['key'], uri, hashlib.sha256)
+            sig = binascii.b2a_base64(hashed.digest())
+            params['Signature'] = sig.strip()
+
+            querystring = urllib.urlencode(params)
+            requesturl = 'https://{0}/?{1}'.format(endpoint, querystring)
 
     log.debug('EC2 Request: {0}'.format(requesturl))
     try:
@@ -331,6 +381,15 @@ def query(params=None, setname=None, requesturl=None, location=None,
 
     return ret
 
+def _sign(key, msg):
+    return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+def _getSignatureKey(key, dateStamp, regionName, serviceName):
+    kDate = _sign(('AWS4' + key).encode('utf-8'), dateStamp)
+    kRegion = _sign(kDate, regionName)
+    kService = _sign(kRegion, serviceName)
+    kSigning = _sign(kService, 'aws4_request')
+    return kSigning
 
 def avail_sizes():
     '''
@@ -650,7 +709,7 @@ def get_vpcname(vpcid, call=None):
 
 def _deref_subnetname(subnet_name, vm_=None):
     vpcid = config.get_config_value(
-        'vpcid', vm_, __opts__, search_global=False)
+        'vpcid', vm_, __opts__)
     vpcname = _get_vpcname(describe_vpc({ 'vpc-id': vpcid }, call='function'))
     if vpcid is None:
         return None
@@ -702,7 +761,7 @@ def securitygroupid(vm_):
 
 def _deref_securitygroupname(sg_name, vm_=None):
     vpcid = config.get_config_value(
-        'vpcid', vm_, __opts__, search_global=False
+        'vpcid', vm_, __opts__
         )
     vpc = describe_vpc({ 'vpc-id': vpcid }, call='function')
     vpcname = _get_vpcname(vpc)
@@ -2802,6 +2861,77 @@ def create_egress_rule(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
+
+def create_cluster_subnet_group(kwargs=None, call=None):
+    '''
+    Create a new Cluster Subnet Group for a VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster_subnet_group function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'subnet-id' not in kwargs:
+        log.error('subnet-id must be specified.')
+        return False
+
+    if 'group-name' not in kwargs:
+        log.error('group-name must be specified for the Cluster Subnet Group.')
+        return False
+
+    if 'group-desc' not in kwargs:
+        kwargs['group-desc'] = kwargs['group-name']
+
+    params = { 'Action': 'CreateClusterSubnetGroup',
+               'ClusterSubnetGroupName': kwargs['group-name'],
+               'Description': kwargs['group-desc'],
+               'SubnetIds.member.1': kwargs['subnet-id'] }
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
+
+def create_cluster(kwargs=None, call=None):
+    '''
+    Create a new Cluster
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type' ]:
+        if req not in kwargs:
+            log.error('{0} must be specified.'.format(req))
+            return False
+
+    params = { 'Action': 'CreateCluster',
+               'ClusterIdentifier': kwargs['cluster-name'],
+               'MasterUserPassword': kwargs['master-pass'],
+               'MasterUsername': kwargs['master-user'],
+               'NodeType': kwargs['node-type'] }
+
+    if 'subnetgroup-name' in kwargs:
+        params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
+
+    if 'cluster-type' in kwargs:
+        params['ClusterType'] = kwargs['cluster-type']
+
+    if 'public-access' in kwargs:
+        params['PubliclyAccessible'] = kwargs['public-access']
+
+    # this is pretty naive, just one securitygroup for now
+    if 'vpc-securitygroup' in kwargs:
+        params['VpcSecurityGroupIds.member.1'] = kwargs['vpc-securitygroup']
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
 
 def list_certificates(kwargs=None, call=None):
     '''
