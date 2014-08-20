@@ -711,6 +711,8 @@ class Cloud(object):
         '''
         output = {}
 
+        log.debug(vpc_)
+
         alias, driver = vpc_['provider'].split(':')
         required_funcs = [ '{0}.create_vpc'.format(driver), '{0}.create_subnet'.format(driver), '{0}.create_igw'.format(driver), '{0}.attach_igw'.format(driver), '{0}.create_routetable'.format(driver), '{0}.create_route'.format(driver), '{0}.attach_subnet'.format(driver), '{0}.create_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.create_sg'.format(driver), '{0}.create_ingress_rule'.format(driver), '{0}.create_egress_rule'.format(driver), '{0}.set_tags'.format(driver) ]
         for fun in required_funcs:
@@ -734,7 +736,7 @@ class Cloud(object):
                 vpc_['vpc-id'] = output[1]['vpcId']
                 log.info('Created VPC {0}'.format(vpc_['vpc-id']))
                 time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready
-                self._set_tags(vpc_['name'], vpc_['vpc-id'], driver)
+                self._set_tag(vpc_['name'], vpc_['vpc-id'], driver)
 
             create_subnet = '{0}.create_subnet'.format(driver)
             with CloudProviderContext(self.clouds[create_subnet], alias, driver):
@@ -748,7 +750,7 @@ class Cloud(object):
                     log.info('Created subnet {0} in VPC {1}'.format(subnet['subnet-id'],
                                                                     subnet['vpc-id']))
                     vpc_subnet_name = '{0}-{1}'.format(vpc_['name'], subnet_name)
-                    self._set_tags(subnet_name, subnet['subnet-id'], driver)
+                    self._set_tag(vpc_subnet_name, subnet['subnet-id'], driver)
 
             self.create_vpc_securitygroups(vpc_, local_master)
 
