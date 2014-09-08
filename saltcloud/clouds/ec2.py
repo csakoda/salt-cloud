@@ -236,6 +236,12 @@ def query(params=None, setname=None, requesturl=None, location=None,
     if not requesturl:
         method = 'GET'
 
+        # copy the params in case the same instance of params is queries many times
+        params = params.copy()
+
+        params['Version'] = '2012-06-01'
+        params['SignatureVersion'] = '2'
+
         if endpoint_provider == 'ec2':
             endpoint = provider.get(
                 'endpoint',
@@ -244,32 +250,87 @@ def query(params=None, setname=None, requesturl=None, location=None,
         elif endpoint_provider == 'elb':
             endpoint = provider.get(
                 'elb_endpoint',
-                'elasticloadbalancing.amazonaws.com'
-            )            
+                'elasticloadbalancing.{0}.{1}'.format(location, service_url)
+            )
+        elif endpoint_provider == 'redshift':
+            endpoint = provider.get(
+                'redshift_endpoint',
+                'redshift.{0}.{1}'.format(location, service_url)
+            )
+            params['Version'] = '2012-12-01'
+            params['SignatureVersion'] = '4'
+            service = 'redshift'
+        elif endpoint_provider == 'iam':
+            endpoint = provider.get(
+                'iam_endpoint',
+                'iam.amazonaws.com'
+            )
+            params['Version'] = '2010-05-08'
         else:
             log.error(
                 'Unknown endpoint_provider: ' + endpoint_provider
             )
 
-        params['AWSAccessKeyId'] = provider['id']
-        params['SignatureVersion'] = '2'
-        params['SignatureMethod'] = 'HmacSHA256'
-        params['Timestamp'] = '{0}'.format(timestamp)
-        params['Version'] = '2012-06-01'
-        keys = sorted(params.keys())
-        values = map(params.get, keys)
-        querystring = urllib.urlencode(list(zip(keys, values)))
+        if params['SignatureVersion'] == '4':
+            # adapted from http://docs.aws.amazon.com/general/latest/gr/sigv4-signed-request-examples.html
+            # Create a date for headers and the credential string
+            t = datetime.datetime.utcnow()
+            amz_date = t.strftime('%Y%m%dT%H%M%SZ') # Format date as YYYYMMDD'T'HHMMSS'Z'
+            datestamp = t.strftime('%Y%m%d') # Date w/o time, used in credential scope
 
-        uri = '{0}\n{1}\n/\n{2}'.format(method.encode('utf-8'),
-                                        endpoint.encode('utf-8'),
-                                        querystring.encode('utf-8'))
+            canonical_uri = '/'
 
-        hashed = hmac.new(provider['key'], uri, hashlib.sha256)
-        sig = binascii.b2a_base64(hashed.digest())
-        params['Signature'] = sig.strip()
+            canonical_headers = 'host:' + endpoint + '\n'
+            signed_headers = 'host'
 
-        querystring = urllib.urlencode(params)
-        requesturl = 'https://{0}/?{1}'.format(endpoint, querystring)
+            algorithm = 'AWS4-HMAC-SHA256'
+            credential_scope = datestamp + '/' + location + '/' + service + '/' + 'aws4_request'
+
+            keys = sorted(params.keys())
+            values = map(params.get, keys)
+            querystring = urllib.urlencode(list(zip(keys, values)))
+
+            canonical_querystring = querystring
+            canonical_querystring += '&X-Amz-Algorithm=AWS4-HMAC-SHA256'
+            canonical_querystring += '&X-Amz-Credential=' + urllib.quote_plus(provider['id'] + '/' + credential_scope)
+            canonical_querystring += '&X-Amz-Date=' + amz_date
+            canonical_querystring += '&X-Amz-Expires=30'
+            canonical_querystring += '&X-Amz-SignedHeaders=' + signed_headers
+
+            # Create payload hash. For GET requests, the payload is an
+            # empty string ("").
+            payload_hash = hashlib.sha256('').hexdigest()
+
+            canonical_request = method + '\n' + canonical_uri + '\n' + canonical_querystring + '\n' + canonical_headers + '\n' + signed_headers + '\n' + payload_hash
+            log.debug('Canonical Request: {0}'.format(canonical_request))
+
+            string_to_sign = algorithm + '\n' +  amz_date + '\n' +  credential_scope + '\n' +  hashlib.sha256(canonical_request).hexdigest()
+            log.debug('String-to-Sign: {0}'.format(string_to_sign))
+            signing_key = _getSignatureKey(provider['key'], datestamp, location, service)
+            signature = hmac.new(signing_key, (string_to_sign).encode("utf-8"), hashlib.sha256).hexdigest()
+            canonical_querystring += '&X-Amz-Signature=' + signature
+            log.debug('Canonical Querystring: {0}'.format(canonical_querystring))
+
+            requesturl = 'https://{0}/?{1}'.format(endpoint, canonical_querystring)
+        else:
+            params['AWSAccessKeyId'] = provider['id']
+            params['SignatureMethod'] = 'HmacSHA256'
+            params['Timestamp'] = '{0}'.format(timestamp)
+
+            keys = sorted(params.keys())
+            values = map(params.get, keys)
+            querystring = urllib.urlencode(list(zip(keys, values)))
+
+            uri = '{0}\n{1}\n/\n{2}'.format(method.encode('utf-8'),
+                                            endpoint.encode('utf-8'),
+                                            querystring.encode('utf-8'))
+
+            hashed = hmac.new(provider['key'], uri, hashlib.sha256)
+            sig = binascii.b2a_base64(hashed.digest())
+            params['Signature'] = sig.strip()
+
+            querystring = urllib.urlencode(params)
+            requesturl = 'https://{0}/?{1}'.format(endpoint, querystring)
 
     log.debug('EC2 Request: {0}'.format(requesturl))
     try:
@@ -287,6 +348,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         )
         root = ET.fromstring(exc.read())
         data = _xml_to_dict(root)
+        print data
         if return_url is True:
             return {'error': data}, requesturl
         return {'error': data}
@@ -319,6 +381,15 @@ def query(params=None, setname=None, requesturl=None, location=None,
 
     return ret
 
+def _sign(key, msg):
+    return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+def _getSignatureKey(key, dateStamp, regionName, serviceName):
+    kDate = _sign(('AWS4' + key).encode('utf-8'), dateStamp)
+    kRegion = _sign(kDate, regionName)
+    kService = _sign(kRegion, serviceName)
+    kSigning = _sign(kService, 'aws4_request')
+    return kSigning
 
 def avail_sizes():
     '''
@@ -624,17 +695,86 @@ def get_subnetid(vm_):
     )
     if subnetid is None:
         return None
+    if not subnetid.startswith('subnet-'):
+        # try to dereference in vpc
+        subnetid = _deref_subnetname(subnetid, vm_)
     return subnetid
 
+def get_vpcname(vpcid, call=None):
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The get_vpcname function must be called with -f or --function.'
+        )
+    return _get_vpcname(describe_vpc({ 'vpc-id': vpcid }, call='function'))
+
+def _deref_subnetname(subnet_name, vm_=None):
+    vpcid = config.get_config_value(
+        'vpcid', vm_, __opts__)
+    vpcname = _get_vpcname(describe_vpc({ 'vpc-id': vpcid }, call='function'))
+    if vpcid is None:
+        return None
+    else:
+        params = { 'vpc-id': vpcid,
+                   'subnet-name':  '{0}-{1}'.format(vpcname, subnet_name) }
+        subnet = describe_subnet(params, call='function')
+        if 'item' in subnet[1]:
+            subnetid = subnet[1]['item']['subnetId']
+        else:
+            raise SaltCloudException(
+                'Could not find subnet tagged with Name {0}-{1} in {2}'.format(vpcname,
+                                                                               subnet_name,
+                                                                               vpcid))
+
+        return subnetid
+
+def _get_vpcname(vpc_data):
+    tags = vpc_data[1]['item']['tagSet']
+    if not isinstance(tags, list):
+        if tags['item']['key'] == 'Name':
+            return tags['item']['value']
+    else:
+        for tag in tags:
+            if tag['item']['key'] == 'Name':
+                return tag['item']['value']
+    return None
 
 def securitygroupid(vm_):
     '''
     Returns the SecurityGroupId
     '''
-    return config.get_config_value(
+    securitygroupid = config.get_config_value(
         'securitygroupid', vm_, __opts__, search_global=False
     )
 
+    if securitygroupid:
+        if isinstance(securitygroupid, str) and not securitygroupid.startswith('sg-'):
+            return _deref_securitygroupname(securitygroupid, vm_)
+        elif isinstance(securitygroupid, list):
+            sg_deref = []
+            for (counter, sg_) in enumerate(securitygroupid):
+                if not sg_.startswith('sg-'):
+                    sg_deref.append(_deref_securitygroupname(sg_, vm_))
+                else:
+                    sg_deref.append(sg_)
+            return sg_deref
+    return securitygroupid
+
+def _deref_securitygroupname(sg_name, vm_=None):
+    vpcid = config.get_config_value(
+        'vpcid', vm_, __opts__
+        )
+    vpc = describe_vpc({ 'vpc-id': vpcid }, call='function')
+    vpcname = _get_vpcname(vpc)
+    params = { 'vpc-id': vpcid }
+    params['group-name'] = '{0}-{1}'.format(vpcname, sg_name)
+    sg_data = describe_sg(params, call='function')
+    if 'item' in sg_data[1]:
+        return sg_data[1]['item']['groupId']
+    else:
+        raise SaltCloudException(
+            'Could not find security group named {0}-{1} in {2}'.format(vpcname,
+                                                                        sg_name,
+                                                                        vpcid))
 
 def list_availability_zones():
     '''
@@ -729,6 +869,19 @@ def create(vm_=None, call=None):
             set_delvol_on_destroy
         ).lower()
 
+    root_vol_size = config.get_config_value(
+        'root_vol_size', vm_, __opts__, search_global=False
+    )
+
+    if root_vol_size is not None:
+        if not isinstance(root_vol_size, int):
+            raise SaltCloudConfigError(
+                '\'root_vol_size\' should be a integer value.'
+            )
+
+        params['BlockDeviceMapping.1.DeviceName'] = '/dev/sda1'
+        params['BlockDeviceMapping.1.Ebs.VolumeSize'] = str(root_vol_size)
+
     # Get ANY defined volumes settings, merging data, in the following order
     # 1. VM config
     # 2. Profile config
@@ -787,6 +940,7 @@ def create(vm_=None, call=None):
                 )
             )
             attempts -= 1
+            sleep(5 * (5-attempts))
             continue
 
         if isinstance(data, list) and not data:
@@ -797,6 +951,7 @@ def create(vm_=None, call=None):
                 )
             )
             attempts -= 1
+            sleep(5 * (5-attempts))
             continue
 
         break
@@ -806,27 +961,37 @@ def create(vm_=None, call=None):
         )
 
     def __query_ip_address(params, url):
-        data = query(params, requesturl=url)
-        if not data:
-            log.error(
-                'There was an error while querying EC2. Empty response'
-            )
-            # Trigger a failure in the wait for IP function
-            return False
+        attempts = 5
+        while attempts > 0:
+            data = query(params, requesturl=url)
+            if not data:
+                log.error(
+                    'There was an error retrieving instance IP. Empty response'
+                    )
+                attempts -=1
+                sleep(5 * (5-attempts))
+                continue
 
-        if isinstance(data, dict) and 'error' in data:
-            log.warn(
-                'There was an error in the query. {0}'.format(data['error'])
-            )
-            # Trigger a failure in the wait for IP function
-            return False
+            if isinstance(data, dict) and 'error' in data:
+                log.warn(
+                    'There was an error retrieving instance IP. {0}'.format(data['error'])
+                    )
+                attempts -=1
+                sleep(5 * (5-attempts))
+                continue
 
-        log.debug('Returned query data: {0}'.format(data))
+            # no errors => success
+            log.debug('Returned query data: {0}'.format(data))
 
-        if 'ipAddress' in data[0]['instancesSet']['item']:
-            return data
-        if 'privateIpAddress' in data[0]['instancesSet']['item']:
-            return data
+            if 'ipAddress' in data[0]['instancesSet']['item']:
+                return data
+            if 'privateIpAddress' in data[0]['instancesSet']['item']:
+                return data
+
+        # Trigger a failure in the wait for IP function
+        log.error('Could not find an IP address for {0}'.format(instance_id))
+        return False
+
 
     try:
         data = saltcloud.utils.wait_for_ip(
@@ -931,7 +1096,7 @@ def create(vm_=None, call=None):
                 log.error('Failed to start Salt on Cloud VM {name}'.format(**vm_))
     else:
         log.info('Administrator password not yet generated.  Check back later with \'salt-cloud -a get_password {0}\''.format(vm_['name']))
- 
+
     log.info('Created Cloud VM {0[name]!r}'.format(vm_))
     log.debug(
         '{0[name]!r} VM creation details:\n{1}'.format(
@@ -963,7 +1128,7 @@ def create_attach_volumes(name, kwargs, call=None):
     '''
     if call != 'action':
         raise SaltCloudSystemExit(
-            'The set_tags action must be called with -a or --action.'
+            'The create_attach_volumes action must be called with -a or --action.'
         )
 
     if not 'instance_id' in kwargs:
@@ -1019,7 +1184,7 @@ def create_attach_volumes(name, kwargs, call=None):
                     )
                 )
                 attempts -= 1
-		sleep(1)
+		sleep(5 * (5-attempts))
                 continue
 
             if isinstance(data, list) and not data:
@@ -1030,9 +1195,9 @@ def create_attach_volumes(name, kwargs, call=None):
                     )
                 )
                 attempts -= 1
-		sleep(1)
+		sleep(5 * (5-attempts))
                 continue
-            
+
             # No errors, volume successfully attached
 
             msg = (
@@ -1049,6 +1214,43 @@ def create_attach_volumes(name, kwargs, call=None):
             )
 
     return ret
+
+def create_attach_volumes_quick(name, kwargs, call=None):
+    '''
+    Create and attach volumes to created node
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The create_attach_volumes_quick action must be called with -a or --action.'
+        )
+
+    if not 'drive_letters' in kwargs:
+        log.error('drive_letters must be specified')
+        return False
+
+    if not 'size' in kwargs:
+        log.error('size must be specified')
+        return False
+
+    volumes = []
+    for letter in kwargs['drive_letters']:
+        volume = {}
+        volume['size'] = kwargs['size']
+        volume['device'] = '/dev/sd' + letter
+        volumes.append(volume)
+
+    instance = _get_node(name)
+
+    return create_attach_volumes(name,
+                                {
+                                    'volumes': volumes,
+                                    'instance_id': instance['instanceId'],
+                                    'zone': instance['placement']['availabilityZone']
+                                },
+                                call='action'
+                            )
+
+
 
 
 def stop(name, call=None):
@@ -1354,7 +1556,7 @@ def list_nodes_full(location=None):
         for loc in locations:
             ret.update(_list_nodes_full(loc))
         return ret
-    
+
     return _list_nodes_full(location)
 
 
@@ -2021,7 +2223,7 @@ def create_elb(kwargs=None, call=None):
 
     if 'zones' not in kwargs and 'subnets' not in kwargs:
         log.error('At least one Availability Zone or SubnetId is required.')
-        return False
+#        return False
 
     if 'listeners' not in kwargs:
         log.error('At least one Listener is required.')
@@ -2052,15 +2254,22 @@ def create_elb(kwargs=None, call=None):
         listeners = kwargs['listeners']
     for index in range(0, len(listeners)):
         listener = listeners[index]
-        if 'protocol' in listener and 'instance-port' in listener and 'lb-port' in listener:
+        if 'lb-protocol' in listener and 'instance-port' in listener and 'lb-port' in listener and 'instance-protocol' in listener:
+            params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['lb-protocol']
+            params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
+            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['instance-protocol']
+            params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
+        elif 'protocol' in listener and 'instance-port' in listener and 'lb-port' in listener:
             params['Listeners.member.{0}.Protocol'.format(index+1)] = listener['protocol']
             params['Listeners.member.{0}.InstancePort'.format(index+1)] = listener['instance-port']
+            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['protocol']
             params['Listeners.member.{0}.LoadBalancerPort'.format(index+1)] = listener['lb-port']
         else:
-            log.error('protocol, instance-port, lb-port are required parameters')
+            log.error('instance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
             return False
-        if 'instance-protocol' in listener: 
-            params['Listeners.member.{0}.InstanceProtocol'.format(index+1)] = listener['instance-protocol']
+        if 'cert-name' in listener:
+            cert_id = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == listener['cert-name'] ][0]
+            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = cert_id
         if 'cert-id' in listener:
             params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
     # Subnets and Security groups only required for VPC?
@@ -2073,7 +2282,11 @@ def create_elb(kwargs=None, call=None):
         else:
             securitygroups = kwargs['securitygroups']
         for index in range(0, len(securitygroups)):
-            params['SecurityGroups.member.' + str(index+1)] = securitygroups[index]
+            if not securitygroups[index].startswith('sg-'):
+                securitygroupid = _deref_securitygroupname(securitygroups[index], kwargs)
+            else:
+                securitygroupid = securitygroups[index]
+            params['SecurityGroups.member.' + str(index+1)] = securitygroupid
 
     # Subnets
     if 'subnets' in kwargs:
@@ -2082,39 +2295,87 @@ def create_elb(kwargs=None, call=None):
         else:
             subnets = kwargs['subnets']
         for index in range(0, len(subnets)):
-            params['Subnets.member.' + str(index+1)] = subnets[index]
+            if not subnets[index].startswith('subnet-'):
+                subnetid = _deref_subnetname(subnets[index], kwargs)
+            else:
+                subnetid = subnets[index]
+            params['Subnets.member.' + str(index+1)] = subnetid
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
 
-def attach_elb(kwargs=None, call=None):
+def attach_elb(name, kwargs=None, call=None):
     '''
-    Create an Elastic Load Balancer
+    Attach and instance to an Elastic Load Balancer
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The attach_elb action must be called with -a or --action.'
+        )
+    if not kwargs:
+        kwargs = {}
+
+    instance_id = _get_node(name)['instanceId']
+    if not 'lb-name' in kwargs:
+        log.error('You must specify a lb-name to attach to')
+        return False
+
+    params = {'Action': 'RegisterInstancesWithLoadBalancer',
+              'LoadBalancerName': kwargs['lb-name'],
+              'Instances.member.1.InstanceId': instance_id
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+def detach_elb(name, kwargs=None, call=None):
+    '''
+    Detach an instance from an Elastic Load Balancer
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The detach_elb action must be called with -a or --action.'
+        )
+    if not kwargs:
+        kwargs = {}
+
+    instance_id = _get_node(name)['instanceId']
+    if not 'lb-name' in kwargs:
+        log.error('You must specify a lb-name to detach from')
+        return False
+
+    params = {'Action': 'DeregisterInstancesFromLoadBalancer',
+              'LoadBalancerName': kwargs['lb-name'],
+              'Instances.member.1.InstanceId': instance_id
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+def describe_elb_instance_health(kwargs=None, call=None):
+    '''
+    Describe the instance health of all instances on the Elastic Load Balancer
     '''
     if call != 'function':
-        log.error(
-            'The create_elb function must be called with -f or --function.'
+        raise SaltCloudSystemExit(
+            'The describe_elb_instance_health action must be called with -f or --function.'
         )
-        return False
 
     if not kwargs:
         kwargs = {}
 
-    if 'instances' not in kwargs:
-        log.error('At least one instance id is required.')
+    if not 'lb-name' in kwargs:
+        log.error('You must specify a lb-name to describe')
         return False
 
-    params = {'Action': 'RegisterInstancesWithLoadBalancer',
-              'LoadBalancerName': kwargs['loadbalancername']
-              }
 
-    # Instances.member.N instances=i-184dbd7b;i-b6d5b9dc
-    instances = kwargs['instances'].split(';')
-    for index in range(0, len(instances)):
-        params['Instances.member.{0}.InstanceId'.format(index+1)] = instances[index]
+    params = {'Action': 'DescribeInstanceHealth',
+              'LoadBalancerName': kwargs['lb-name']
+              }
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
+
 
 def configure_elb_healthcheck(kwargs=None, call=None):
     '''
@@ -2184,7 +2445,7 @@ def create_vpc(kwargs=None, call=None):
 
     if 'instance-tenancy' not in kwargs:
         kwargs['instance-tenancy'] = 'default'
-        
+
     params = {'Action': 'CreateVpc',
               'InstanceTenancy': kwargs['instance-tenancy'],
               'CidrBlock': kwargs['cidr-block']
@@ -2192,6 +2453,62 @@ def create_vpc(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
+
+def describe_vpc(kwargs=None, call=None):
+    '''
+    Describe a Virtual Private Cloud
+    '''
+    if call != 'function':
+        log.error(
+            'The describe_vpc function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    params = {'Action': 'DescribeVpcs',
+              'VpcId.1': kwargs['vpc-id']
+              }
+
+    data = query(params, return_root=True)
+    return data
+
+def describe_subnet(kwargs=None, call=None):
+    '''
+    Describe a single subnet within a VPC identified by name
+    '''
+    if call != 'function':
+        log.error(
+            'The describe_subnet function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    if 'subnet-name' not in kwargs:
+        log.error('subnet-name must be specified.')
+        return False
+
+    params = {'Action': 'DescribeSubnets',
+              'Filter.1.Name': 'vpc-id',
+              'Filter.1.Value.1': kwargs['vpc-id'],
+              'Filter.2.Name': 'tag:Name',
+              'Filter.2.Value.1': kwargs['subnet-name'],
+              }
+
+    data = query(params, return_root=True)
+    return data
+
 
 def create_subnet(kwargs=None, call=None):
     '''
@@ -2243,7 +2560,7 @@ def create_igw(kwargs=None, call=None):
 
     data = query(params, return_root=True)
     return data
- 
+
 def attach_igw(kwargs=None, call=None):
     '''
     Attach an existing Internet Gateway to VPC
@@ -2402,7 +2719,7 @@ def attach_eip(kwargs=None, call=None):
         kwargs = {}
 
     params = {'Action': 'AssociateAddress' }
-    
+
     if 'public-ip' in kwargs:
         params['PublicIp'] = kwargs['public-ip']
 
@@ -2420,6 +2737,37 @@ def attach_eip(kwargs=None, call=None):
 
     if 'allow-reassociation' in kwargs:
         params['AllowReassociation'] = kwargs['allow-reassociation']
+
+    data = query(params, return_root=True)
+    return data
+
+def describe_sg(kwargs=None, call=None):
+    '''
+    Describe a security group by name in a VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The describe_sg function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'vpc-id' not in kwargs:
+        log.error('vpc-id must be specified.')
+        return False
+
+    if 'group-name' not in kwargs:
+        log.error('group-name must be specified.')
+        return False
+
+    params = {'Action': 'DescribeSecurityGroups',
+              'Filter.1.Name': 'vpc-id',
+              'Filter.1.Value.1': kwargs['vpc-id'],
+              'Filter.2.Name': 'group-name',
+              'Filter.2.Value.1': kwargs['group-name']
+              }
 
     data = query(params, return_root=True)
     return data
@@ -2452,7 +2800,7 @@ def create_sg(kwargs=None, call=None):
 
     if 'vpc-id' in kwargs:
         params['VpcId'] = kwargs['vpc-id']
-        
+
     data = query(params, return_root=True)
     return data
 
@@ -2483,7 +2831,7 @@ def create_ingress_rule(kwargs=None, call=None):
     if not _parse_ip_permissions(kwargs, params):
         log.error('Failed to parse rules (IpPermissions)')
         return False
-        
+
     data = query(params, return_root=True)
     return data
 
@@ -2514,6 +2862,95 @@ def create_egress_rule(kwargs=None, call=None):
     data = query(params, return_root=True)
     return data
 
+def create_cluster_subnet_group(kwargs=None, call=None):
+    '''
+    Create a new Cluster Subnet Group for a VPC
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster_subnet_group function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'subnet-id' not in kwargs:
+        log.error('subnet-id must be specified.')
+        return False
+
+    if 'group-name' not in kwargs:
+        log.error('group-name must be specified for the Cluster Subnet Group.')
+        return False
+
+    if 'group-desc' not in kwargs:
+        kwargs['group-desc'] = kwargs['group-name']
+
+    params = { 'Action': 'CreateClusterSubnetGroup',
+               'ClusterSubnetGroupName': kwargs['group-name'],
+               'Description': kwargs['group-desc'],
+               'SubnetIds.member.1': kwargs['subnet-id'] }
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
+
+def create_cluster(kwargs=None, call=None):
+    '''
+    Create a new Cluster
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type' ]:
+        if req not in kwargs:
+            log.error('{0} must be specified.'.format(req))
+            return False
+
+    params = { 'Action': 'CreateCluster',
+               'ClusterIdentifier': kwargs['cluster-name'],
+               'MasterUserPassword': kwargs['master-pass'],
+               'MasterUsername': kwargs['master-user'],
+               'NodeType': kwargs['node-type'] }
+
+    if 'subnetgroup-name' in kwargs:
+        params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
+
+    if 'cluster-type' in kwargs:
+        params['ClusterType'] = kwargs['cluster-type']
+
+    if 'public-access' in kwargs:
+        params['PubliclyAccessible'] = kwargs['public-access']
+
+    # this is pretty naive, just one securitygroup for now
+    if 'vpc-securitygroup' in kwargs:
+        params['VpcSecurityGroupIds.member.1'] = kwargs['vpc-securitygroup']
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+
+def list_certificates(kwargs=None, call=None):
+    '''
+    List all cerficiates on an account
+    '''
+    if call != 'function':
+        log.error(
+            'The list_certificates function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    params = { 'Action': 'ListServerCertificates' }
+
+    data = query(params, return_root=True, endpoint_provider='iam')
+    return data[0]['ServerCertificateMetadataList']['member']
+
 def _parse_ip_permissions(kwargs = None, params = None):
     if not isinstance(kwargs, dict) or not isinstance(params, dict):
         log.error('_parse_ip_permissions must be passed instances of kwargs and params')
@@ -2537,13 +2974,13 @@ def _parse_ip_permissions(kwargs = None, params = None):
                 params['IpPermissions.{0}.ToPort'.format(index+1)] = rule['to-port']
             # TODO: make this implementation support multiple ip-ranges / groups per rule
             if 'ip-range' in rule:
-                params['IpPermissions.{0}.IpRanges.1.CidrIp'.format(index+1)] = rule['ip-range']                
+                params['IpPermissions.{0}.IpRanges.1.CidrIp'.format(index+1)] = rule['ip-range']
             if 'group-name' in rule:
-                params['IpPermissions.{0}.Groups.1.GroupName'.format(index+1)] = rule['group-name']                
+                params['IpPermissions.{0}.Groups.1.GroupName'.format(index+1)] = rule['group-name']
             if 'group-id' in rule:
-                params['IpPermissions.{0}.Groups.1.GroupId'.format(index+1)] = rule['group-id']              
+                params['IpPermissions.{0}.Groups.1.GroupId'.format(index+1)] = rule['group-id']
             if 'user-id' in rule:
-                params['IpPermissions.{0}.Groups.1.UserId'.format(index+1)] = rule['user-id']                
+                params['IpPermissions.{0}.Groups.1.UserId'.format(index+1)] = rule['user-id']
         else:
             log.error('rules.protocol is a required parameter')
             return False

@@ -47,6 +47,10 @@ VPC_CONFIG_DEFAULTS = {
     'default_include': 'cloud.vpc.profiles.d/*.conf',
 }
 
+LB_CONFIG_DEFAULTS = {
+    'default_include': 'cloud.lb.profiles.d/*.conf',
+}
+
 PROVIDER_CONFIG_DEFAULTS = {
     'default_include': 'cloud.providers.d/*.conf',
 }
@@ -58,7 +62,8 @@ def cloud_config(path, env_var='SALT_CLOUD_CONFIG', defaults=None,
                  master_config_path=None, master_config=None,
                  providers_config_path=None, providers_config=None,
                  vm_config_path=None, vm_config=None, 
-                 vpc_config_path=None, vpc_config=None):
+                 vpc_config_path=None, vpc_config=None,
+                 lb_config_path=None, lb_config=None):
     '''
     Read in the salt cloud config and return the dict
     '''
@@ -186,6 +191,18 @@ def cloud_config(path, env_var='SALT_CLOUD_CONFIG', defaults=None,
             '/etc/salt/cloud.vpc.profiles'
         )
 
+    if lb_config_path is not None and lb_config is not None:
+        raise saltcloud.exceptions.SaltCloudConfigError(
+            'Only pass `lb_config` or `lb_config_path`, not both.'
+        )
+    elif lb_config_path is None and lb_config is None:
+        lb_config_path = overrides.get(
+            # use the value from the cloud config file
+            'lb_config',
+            # if not found, use the default path
+            '/etc/salt/cloud.lb.profiles'
+        )
+
     # Apply the salt-cloud configuration
     opts = apply_cloud_config(overrides, defaults)
 
@@ -234,6 +251,11 @@ def cloud_config(path, env_var='SALT_CLOUD_CONFIG', defaults=None,
         # Load profiles configuration from the provided file
         vpc_config = vpc_profiles_config(vpc_config_path, providers_config)
     opts['vpc_profiles'] = vpc_config
+
+    if lb_config is None:
+        # Load profiles configuration from the provided file
+        lb_config = lb_profiles_config(lb_config_path, providers_config)
+    opts['lb_profiles'] = lb_config
 
     # Return the final options
     return opts
@@ -842,13 +864,163 @@ def apply_vpc_profiles_config(providers, overrides, defaults=None):
             vms.pop(profile)
             continue
 
-        extended = vms.get(extends).copy()
-        extended.pop('profile')
-        for key in details:
-            if key in extended and isinstance(extended[key], dict):
-                extended[key].update(details[key])
+        extended = _get_extended_details(vms, extends)
+        for item in details:
+            if isinstance(details[item], dict):
+                if item not in extended:
+                    extended[item] = details[item]
+                else:
+                    # merge the two dicts
+                    for inner_item in details[item]:
+                        extended[item][inner_item] = details[item][inner_item]
             else:
-                extended[key] = details[key]
+                extended[item] = details[item]
+
+        if ':' not in extended['provider']:
+            if extended['provider'] not in providers:
+                log.warning(
+                    'The profile {0!r} is defining {1[provider]!r} as the '
+                    'provider. Since there\'s no valid configuration for '
+                    'that provider, the profile will be removed from the '
+                    'available listing'.format(profile, extended)
+                )
+                vms.pop(profile)
+                continue
+
+            driver = providers[extended['provider']].keys()[0]
+            providers[extended['provider']][driver].setdefault(
+                'profiles', {}).update({profile: extended})
+
+            extended['provider'] = '{0[provider]}:{1}'.format(extended, driver)
+        else:
+            alias, driver = extended['provider'].split(':')
+            if alias not in providers or driver not in providers[alias]:
+                log.warning(
+                    'The profile {0!r} is defining {1[provider]!r} as the '
+                    'provider. Since there\'s no valid configuration for '
+                    'that provider, the profile will be removed from the '
+                    'available listing'.format(profile, extended)
+                )
+                vms.pop(profile)
+                continue
+
+            providers[alias][driver].setdefault('profiles', {}).update(
+                {profile: extended}
+            )
+
+        # Update the profile's entry with the extended data
+        vms[profile] = extended
+
+    return vms
+
+
+def lb_profiles_config(path,
+                 providers,
+                 env_var='SALT_CLOUDLB_CONFIG',
+                 defaults=None):
+    '''
+    Read in the salt cloud LB config file
+    '''
+    if defaults is None:
+        defaults = LB_CONFIG_DEFAULTS
+
+    try:
+        overrides = salt.config.load_config(
+            path, env_var, '/etc/salt/cloud.lb.profiles'
+        )
+    except TypeError:
+        log.warning(
+            'Salt version is lower than 0.16.0, as such, loading '
+            'configuration from the {0!r} environment variable will '
+            'fail'.format(env_var)
+        )
+        overrides = salt.config.load_config(path, env_var)
+
+    default_include = overrides.get(
+        'default_include', defaults['default_include']
+    )
+    include = overrides.get('include', [])
+
+    overrides.update(
+        salt.config.include_config(default_include, path, verbose=False)
+    )
+    overrides.update(
+        salt.config.include_config(include, path, verbose=True)
+    )
+    return apply_lb_profiles_config(providers, overrides, defaults)
+
+def apply_lb_profiles_config(providers, overrides, defaults=None):
+    if defaults is None:
+        defaults = LB_CONFIG_DEFAULTS
+
+    config = defaults.copy()
+    if overrides:
+        config.update(overrides)
+
+    vms = {}
+
+    for key, val in config.items():
+        if key in ('conf_file', 'include', 'default_include'):
+            continue
+        if not isinstance(val, dict):
+            raise saltcloud.exceptions.SaltCloudConfigError(
+                'The VM profiles configuration found in {0[conf_file]!r} is '
+                'not in the proper format'.format(config)
+            )
+        val['profile'] = key
+        vms[key] = val
+
+    # Is any VM profile extending data!?
+    for profile, details in vms.copy().items():
+        if 'extends' not in details:
+            if ':' in details['provider']:
+                alias, driver = details['provider'].split(':')
+                if alias not in providers or driver not in providers[alias]:
+                    log.warning(
+                        'The profile {0!r} is defining {1[provider]!r} as the '
+                        'provider. Since there\'s no valid configuration for '
+                        'that provider, the profile will be removed from the '
+                        'available listing'.format(profile, details)
+                    )
+                    vms.pop(profile)
+                    continue
+
+                if 'profiles' not in providers[alias][driver]:
+                    providers[alias][driver]['profiles'] = {}
+                providers[alias][driver]['profiles'][profile] = details
+
+            if details['provider'] not in providers:
+                log.warning(
+                    'The profile {0!r} is defining {1[provider]!r} as the '
+                    'provider. Since there\'s no valid configuration for '
+                    'that provider, the profile will be removed from the '
+                    'available listing'.format(profile, details)
+                )
+                vms.pop(profile)
+                continue
+
+            driver = providers[details['provider']].keys()[0]
+            providers[details['provider']][driver].setdefault(
+                'profiles', {}).update({profile: details})
+            details['provider'] = '{0[provider]}:{1}'.format(details, driver)
+            vms[profile] = details
+
+            continue
+
+        extends = details.pop('extends')
+        if extends not in vms:
+            log.error(
+                'The {0!r} profile is trying to extend data from {1!r} '
+                'though {1!r} is not defined in the salt profiles loaded '
+                'data. Not extending and removing from listing!'.format(
+                    profile, extends
+                )
+            )
+            vms.pop(profile)
+            continue
+
+        extended = _get_extended_details(vms, extends)
+        extended.update(details)
 
         if ':' not in extended['provider']:
             if extended['provider'] not in providers:

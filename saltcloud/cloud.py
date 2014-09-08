@@ -686,14 +686,35 @@ class Cloud(object):
 
         return ret
 
+    def _get_tags(self, instance_id, driver):
+        get_tags = '{0}.get_tags'.format(driver)
+        tags = self.clouds[get_tags](call='action', instance_id=instance_id)
+        tags_dict = {}
+        for tag in tags:
+            tags_dict[tag['key']] = tag['value']
+        return tags_dict
+
+    def _set_tag(self, name, instance_id, driver):
+        set_tags = '{0}.set_tags'.format(driver)
+
+        self.clouds[set_tags](name, { 'Name': name }, call='action', instance_id=instance_id)
+        tags = self._get_tags(instance_id, driver)
+        while 'Name' not in tags or tags['Name'] != name:
+            self.clouds[set_tags](name, { 'Name': name }, call='action', instance_id=instance_id)
+            tags = self._get_tags(instance_id, driver)
+        log.info('Set tag {0} for {1}'.format(name,
+                                              instance_id))
+
     def create_vpc(self, vpc_, local_master=True):
         '''
         Create a single VPC
         '''
         output = {}
 
+        log.debug(vpc_)
+
         alias, driver = vpc_['provider'].split(':')
-        required_funcs = [ '{0}.create_vpc'.format(driver), '{0}.create_subnet'.format(driver), '{0}.create_igw'.format(driver), '{0}.attach_igw'.format(driver), '{0}.create_routetable'.format(driver), '{0}.create_route'.format(driver), '{0}.attach_subnet'.format(driver), '{0}.create_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.create_sg'.format(driver), '{0}.create_ingress_rule'.format(driver), '{0}.create_egress_rule'.format(driver), '{0}.create_elb'.format(driver), '{0}.configure_elb_healthcheck'.format(driver) ]
+        required_funcs = [ '{0}.create_vpc'.format(driver), '{0}.create_subnet'.format(driver), '{0}.create_igw'.format(driver), '{0}.attach_igw'.format(driver), '{0}.create_routetable'.format(driver), '{0}.create_route'.format(driver), '{0}.attach_subnet'.format(driver), '{0}.create_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.attach_eip'.format(driver), '{0}.create_sg'.format(driver), '{0}.create_ingress_rule'.format(driver), '{0}.create_egress_rule'.format(driver), '{0}.set_tags'.format(driver) ]
         for fun in required_funcs:
             if fun not in self.clouds:
                 log.error(
@@ -714,7 +735,8 @@ class Cloud(object):
                     return output['error']
                 vpc_['vpc-id'] = output[1]['vpcId']
                 log.info('Created VPC {0}'.format(vpc_['vpc-id']))
-                time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready 
+                time.sleep(3) # TODO: replace with actual API status check on VPC being created and ready
+                self._set_tag(vpc_['name'], vpc_['vpc-id'], driver)
 
             create_subnet = '{0}.create_subnet'.format(driver)
             with CloudProviderContext(self.clouds[create_subnet], alias, driver):
@@ -726,38 +748,11 @@ class Cloud(object):
                         return output['error']
                     subnet['subnet-id'] = output[1]['subnetId']
                     log.info('Created subnet {0} in VPC {1}'.format(subnet['subnet-id'],
-                                                                   subnet['vpc-id']))
+                                                                    subnet['vpc-id']))
+                    vpc_subnet_name = '{0}-{1}'.format(vpc_['name'], subnet_name)
+                    self._set_tag(vpc_subnet_name, subnet['subnet-id'], driver)
 
-            create_sg = '{0}.create_sg'.format(driver)
-            create_ingress_rule = '{0}.create_ingress_rule'.format(driver)
-            create_egress_rule = '{0}.create_egress_rule'.format(driver)
-            with CloudProviderContext(self.clouds[create_sg], alias, driver):
-                for sg_name in vpc_['securitygroups']:
-                    sg = vpc_['securitygroups'][sg_name]
-                    sg['group-name'] = sg_name
-                    sg['vpc-id'] = vpc_['vpc-id']
-                    output = self.clouds[create_sg](sg, call='function')
-                    if 'error' in output:
-                        return output['error']
-                    sg['group-id'] = output[2]['groupId']
-                    log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
-                                                                            sg['vpc-id']))
-                    time.sleep(3) # TODO make into a proper API based wait
-                    if 'inbound-rules' in sg:
-                        rules = { 'group-id': sg['group-id'], 'rules': sg['inbound-rules'] }
-                        output = self.clouds[create_ingress_rule](rules, call='function')
-                        if 'error' in output:
-                            return output['error']
-                        log.info('Created inbound rule {0!r} in security group {1}'.format(rules['rules'],
-                                                                                           rules['group-id']))
-                    if 'outbound-rules' in sg:
-                        rules = { 'group-id': sg['group-id'], 'rules': sg['outbound-rules'] }
-                        output = self.clouds[create_egress_rule](rules, call='function')
-                        if 'error' in output:
-                            return output['error']
-                        log.info('Created outbound rule {0!r} in security group {1}'.format(rules['rules'],
-                                                                                            rules['group-id']))
-                   
+            self.create_vpc_securitygroups(vpc_, local_master)
 
             create_routetable = '{0}.create_routetable'.format(driver)
             create_route = '{0}.create_route'.format(driver)
@@ -771,7 +766,7 @@ class Cloud(object):
             with CloudProviderContext(self.clouds[create_routetable], alias, driver):
                 # this is a limited implementation, needs minor refactor to support
                 # generalized routetables .. right now optimized for the basic private/public
-                # VPC setup covered here: 
+                # VPC setup covered here:
                 # http://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_NAT_Instance.html
                 for rtb_type in [ 'public_rtb', 'private_rtb' ]:
                     if rtb_type in vpc_['routetables']:
@@ -807,6 +802,7 @@ class Cloud(object):
                                     vm_['name'] = '{0}-{1}-NAT'.format(vpc_['name'], vpc_['vpc-id'])
                                     vm_['subnetid'] = vpc_['subnets'][vpc_['nat']['subnet']]['subnet-id']
                                     vm_['securitygroupid'] = vpc_['securitygroups'][vpc_['nat']['vpc_securitygroup']]['group-id']
+                                    vm_['vpcid'] = vpc_['vpc-id']
                                     ret = {}
                                     try:
                                         # No need to use CloudProviderContext here because self.create
@@ -827,7 +823,7 @@ class Cloud(object):
                                     while True:
                                         output = self.clouds[describe_instance](instance_id=rtb['instance-id'], call='action')
                                         if 'error' in output:
-                                            return output['error'] 
+                                            return output['error']
                                         if output[1]['item']['instancesSet']['item']['instanceState']['name'] == 'running':
                                             break
                                         log.info('Waiting for NAT instance to be ready.  Checking again in 10 seconds.')
@@ -842,11 +838,11 @@ class Cloud(object):
                                     public_ip = output[1]['publicIp']
                                     log.info('Created Elastic IP {0}'.format(public_ip))
                                     output = self.clouds[attach_eip]({ 'allocation-id': output[3]['allocationId'],
-                                                                       'instance-id': rtb['instance-id']}, 
+                                                                       'instance-id': rtb['instance-id']},
                                                                      call='function')
                                     if 'error' in output:
-                                        return output['error'] 
-                                    log.info('Attached Elastic IP {0} to instance {1}'.format(public_ip, 
+                                        return output['error']
+                                    log.info('Attached Elastic IP {0} to instance {1}'.format(public_ip,
                                                                                               rtb['instance-id']))
                                 except (SaltCloudException, Exception) as exc:
                                     raise
@@ -867,32 +863,33 @@ class Cloud(object):
             create_elb = '{0}.create_elb'.format(driver)
             configure_elb_healthcheck = '{0}.configure_elb_healthcheck'.format(driver)
             with CloudProviderContext(self.clouds[create_elb], alias, driver):
-                for elb_name in vpc_['elb']:
-                    elb = vpc_['elb'][elb_name].copy()
-                    elb['subnets'] = [vpc_['subnets'][subnet]['subnet-id'] for subnet in elb['subnets']]
-                    elb['securitygroups'] = [vpc_['securitygroups'][group]['group-id'] for group in elb['securitygroups']]
-                    elb['loadbalancername'] = elb_name
-                    output = self.clouds[create_elb](elb, call='function')
-                    if 'error' in output:
-                        return output['error']
-                    vpc_['elb'][elb_name]['dns-name'] = output[0]['DNSName']
-                    log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(elb_name, vpc_['elb'][elb_name]['dns-name']))
-                    if 'healthcheck' in elb:
-                        check = elb['healthcheck'].copy()
-                        check['loadbalancername'] = elb_name
-                        output = self.clouds[configure_elb_healthcheck](check, call='function')
+                if 'elb' in vpc_:
+                    for elb_name in vpc_['elb']:
+                        elb = vpc_['elb'][elb_name].copy()
+                        elb['subnets'] = [vpc_['subnets'][subnet]['subnet-id'] for subnet in elb['subnets']]
+                        elb['securitygroups'] = [vpc_['securitygroups'][group]['group-id'] for group in elb['securitygroups']]
+                        elb['loadbalancername'] = elb_name
+                        output = self.clouds[create_elb](elb, call='function')
                         if 'error' in output:
-                            return output['error']    
-                        log.info('Configured healthcheck for Elastic Load Balancer ' + elb_name)
+                            return output['error']
+                        vpc_['elb'][elb_name]['dns-name'] = output[0]['DNSName']
+                        log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(elb_name, vpc_['elb'][elb_name]['dns-name']))
+                        if 'healthcheck' in elb:
+                            check = elb['healthcheck'].copy()
+                            check['loadbalancername'] = elb_name
+                            output = self.clouds[configure_elb_healthcheck](check, call='function')
+                            if 'error' in output:
+                                return output['error']
+                            log.info('Configured healthcheck for Elastic Load Balancer ' + elb_name)
         except KeyError as exc:
             log.exception(
-                'Failed to create VM {0}. Configuration value {1} needs '
+                'Failed to create VPC {0}. Configuration value {1} needs '
                 'to be set'.format(
                     vpc_['name'], exc
                 )
             )
 
-    def run_vpc_profile(self, profile, names):
+    def run_vpc_profile(self, profile, names, securitygroups):
         '''
         Parse over the options passed on the command line and determine how to
         handle them
@@ -913,9 +910,7 @@ class Cloud(object):
         #mapped_providers = self.map_providers_parallel()
         #alias_data = mapped_providers.setdefault(alias, {})
         #vms = alias_data.setdefault(driver, {})
-        from pprint import pprint
-        pprint(profile_details)
-        
+
         #for name in names:
         #     if name in vms and vms[name]['state'].lower() != 'terminated':
         #         msg = '{0} already exists under {0}:{1}'.format(
@@ -930,7 +925,148 @@ class Cloud(object):
         try:
             # No need to use CloudProviderContext here because self.create
             # takes care of that
-            ret[name] = self.create_vpc(vpc_)
+            if securitygroups:
+                ret[name] = self.create_vpc_securitygroups(vpc_)
+            else:
+                ret[name] = self.create_vpc(vpc_)
+        except (SaltCloudSystemExit, SaltCloudConfigError), exc:
+            ret[name] = {'Error': exc.message}
+
+        return ret
+
+    def create_lb(self, lb_, local_master=True):
+        '''
+        Create a single load balancer
+        '''
+        alias, driver = lb_['provider'].split(':')
+        required_funcs = [ '{0}.create_elb'.format(driver), '{0}.configure_elb_healthcheck'.format(driver) ]
+        for fun in required_funcs:
+            if fun not in self.clouds:
+                log.error(
+                    'Creating {0[name]!r} using {0[provider]!r} as the provider '
+                    'cannot complete since {1!r} does not implement {2!r} is not available'.format(
+                        lb_,
+                        driver,
+                        fun
+                        )
+                    )
+                return
+        try:
+            create_elb = '{0}.create_elb'.format(driver)
+            configure_elb_healthcheck = '{0}.configure_elb_healthcheck'.format(driver)
+            with CloudProviderContext(self.clouds[create_elb], alias, driver):
+                lb_['loadbalancername'] = lb_['name']
+                output = self.clouds[create_elb](lb_, call='function')
+                if 'error' in output:
+                    return output['error']
+                lb_['dns-name'] = output[0]['DNSName']
+                log.info('Created Elastic Load Balancer {0} with DNS Name {1}'.format(lb_['name'], lb_['dns-name']))
+                if 'healthcheck' in lb_:
+                    check = lb_['healthcheck'].copy()
+                    check['loadbalancername'] = lb_['name']
+                    output = self.clouds[configure_elb_healthcheck](check, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    log.info('Configured healthcheck for Elastic Load Balancer ' + lb_['name'])
+                return { 'dns-name': lb_['dns-name'], 'result': True }
+        except KeyError as exc:
+            log.exception(
+                'Failed to create Load Balancer {0}. Configuration value {1} needs '
+                'to be set'.format(
+                    lb_['name'], exc
+                )
+            )
+
+    def create_vpc_securitygroups(self, vpc_, local_master=True):
+        alias, driver = vpc_['provider'].split(':')
+        create_sg = '{0}.create_sg'.format(driver)
+        create_ingress_rule = '{0}.create_ingress_rule'.format(driver)
+        create_egress_rule = '{0}.create_egress_rule'.format(driver)
+        get_vpcname = '{0}.get_vpcname'.format(driver)
+
+        with CloudProviderContext(self.clouds[create_sg], alias, driver):
+            if 'vpc-id' not in vpc_:
+                vpcid = config.get_config_value(
+                    'vpcid', vpc_, self.opts, search_global=False
+                    )
+                vpcname = self.clouds[get_vpcname](vpcid, call='function')
+            else:
+                vpcid = vpc_['vpc-id']
+                vpcname = vpc_['name']
+
+            for sg_name in vpc_['securitygroups']:
+                sg = vpc_['securitygroups'][sg_name]
+                sg['group-name'] = '{0}-{1}'.format(vpcname, sg_name)
+                sg['vpc-id'] = vpcid
+                output = self.clouds[create_sg](sg, call='function')
+                if 'error' in output:
+                    try:
+                        if 'already exists' in output['error']['Errors']['Error']['Message']:
+                            log.info('Security group {0} already exists in {1}'.format(sg['group-name'],
+                                                                                       sg['vpc-id']))
+                            continue
+                        else:
+                            return output['error']
+                    except:
+                        return output['error']
+                sg['group-id'] = output[2]['groupId']
+                log.info('Created security group {0} in VPC {1}'.format(sg['group-id'],
+                                                                        sg['vpc-id']))
+                time.sleep(3) # TODO make into a proper API based wait
+                if 'inbound-rules' in sg:
+                    rules = { 'group-id': sg['group-id'], 'rules': sg['inbound-rules'] }
+                    output = self.clouds[create_ingress_rule](rules, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    log.info('Created inbound rule {0!r} in security group {1}'.format(rules['rules'],
+                                                                                       rules['group-id']))
+                if 'outbound-rules' in sg:
+                    rules = { 'group-id': sg['group-id'], 'rules': sg['outbound-rules'] }
+                    output = self.clouds[create_egress_rule](rules, call='function')
+                    if 'error' in output:
+                        return output['error']
+                    log.info('Created outbound rule {0!r} in security group {1}'.format(rules['rules'],
+                                                                                        rules['group-id']))
+
+
+
+    def run_lb_profile(self, profile, names):
+        '''
+        Parse over the options passed on the command line and determine how to
+        handle them
+        '''
+        if profile not in self.opts['lb_profiles']:
+            msg = 'LB Profile {0} is not defined'.format(profile)
+            log.error(msg)
+            return {'Error': msg}
+
+        ret = {}
+        profile_details = self.opts['lb_profiles'][profile]
+        alias, driver = profile_details['provider'].split(':')
+
+        name = names[0]
+
+        # this all gets done so we can check if we're really supposed to stand it up again
+        # there is probably something similar we should do in the VPC world
+        #mapped_providers = self.map_providers_parallel()
+        #alias_data = mapped_providers.setdefault(alias, {})
+        #vms = alias_data.setdefault(driver, {})
+
+        #for name in names:
+        #     if name in vms and vms[name]['state'].lower() != 'terminated':
+        #         msg = '{0} already exists under {0}:{1}'.format(
+        #             name, alias, driver
+        #         )
+        #         log.error(msg)
+        #         ret[name] = {'Error': msg}
+        #         continue
+
+        lb_ = profile_details.copy()
+        lb_['name'] = name
+        try:
+            # No need to use CloudProviderContext here because self.create
+            # takes care of that
+            ret[name] = self.create_lb(lb_)
         except (SaltCloudSystemExit, SaltCloudConfigError), exc:
             ret[name] = {'Error': exc.message}
 
@@ -976,7 +1112,7 @@ class Cloud(object):
             for i in snapshot[0]:
                 if 'snapshotId' in i:
                     source_snaps[dev[0]] = i['snapshotId']
-        
+
         # Restore the snapshots into the destination instance:
         target_volumes = []
         for dev in devices:
