@@ -2089,6 +2089,8 @@ def list_snapshots(location=None):
 def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     '''
     Create a snapshot of a volume or comma-separated list of volumes
+
+    If you supply a description, it will be applied to all snapshots.
     '''
     if not kwargs:
         kwargs = {}
@@ -2102,6 +2104,9 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     for vol in kwargs['volume_id'].split(','):
         params = {'Action': 'CreateSnapshot',
                   'VolumeId': vol}
+
+        if 'description' in kwargs:
+            params['Description'] = kwargs['description']
 
         data.append(query(params, return_root=True))
 
