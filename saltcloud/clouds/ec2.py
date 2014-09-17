@@ -2108,6 +2108,21 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     return data
 
 
+def describe_snapshots(kwargs=None, call=None):
+    filter_count = 0
+
+    params = {'Action': 'DescribeSnapshots'}
+
+    if 'description' in kwargs:
+        description = kwargs['description']
+        filter_count += 1
+        params['Filter.{0}.Name'.format(filter_count)] = 'description'
+        params['Filter.{0}.Value.1'.format(filter_count)] = description
+
+    data = query(params, return_root=True)
+    return data
+
+
 def get_block_device_mapping(name=None, kwargs=None, instance_id=None,
                              call=None):
     '''
