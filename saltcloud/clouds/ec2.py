@@ -2377,6 +2377,31 @@ def describe_elb_instance_health(kwargs=None, call=None):
     return data
 
 
+def describe_elb(kwargs=None, call=None):
+    '''
+    Returns detailed configuration information for the load balancer
+    '''
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The describe_elb action must be called with -f or --function.'
+        )
+
+    if not kwargs:
+        kwargs = {}
+
+    if not 'lb-name' in kwargs:
+        log.error('You must specify lb-name to describe.')
+        return False
+
+    params = {'Action': 'DescribeLoadBalancers',
+              'LoadBalancerNames.member.1': kwargs['lb-name']
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+
+
 def configure_elb_healthcheck(kwargs=None, call=None):
     '''
     Configure the Health Check on a pre-existing Elastic Load Balancer
@@ -2927,11 +2952,15 @@ def create_cluster(kwargs=None, call=None):
     if 'public-access' in kwargs:
         params['PubliclyAccessible'] = kwargs['public-access']
 
+    if 'encrypted' in kwargs:
+        params['Encrypted'] = kwargs['encrypted']
+
     # this is pretty naive, just one securitygroup for now
     if 'vpc-securitygroup' in kwargs:
         params['VpcSecurityGroupIds.member.1'] = kwargs['vpc-securitygroup']
 
     data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
 
 def list_certificates(kwargs=None, call=None):
     '''
