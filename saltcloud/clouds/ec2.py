@@ -1154,13 +1154,13 @@ def create_attach_volumes(name, kwargs, call=None):
             volume_dict['volume_id'] = volume['volume_id']
         elif 'snapshot' in volume:
             volume_dict['snapshot'] = volume['snapshot']
-        else:
-            volume_dict['size'] = volume['size']
 
-            if 'type' in volume:
-                volume_dict['type'] = volume['type']
-            if 'iops' in volume:
-                volume_dict['iops'] = volume['iops']
+        if 'size' in volume:
+            volume_dict['size'] = volume['size']
+        if 'type' in volume:
+            volume_dict['type'] = volume['type']
+        if 'iops' in volume:
+            volume_dict['iops'] = volume['iops']
 
         if 'volume_id' not in volume_dict:
             created_volume = create_volume(volume_dict, call='function')
@@ -2083,12 +2083,11 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
     data = query(params, return_root=True)
     return data
 
-def list_snapshots(location=None):
-    pass
-
 def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     '''
     Create a snapshot of a volume or comma-separated list of volumes
+
+    If you supply a description, it will be applied to all snapshots.
     '''
     if not kwargs:
         kwargs = {}
@@ -2103,8 +2102,26 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
         params = {'Action': 'CreateSnapshot',
                   'VolumeId': vol}
 
+        if 'description' in kwargs:
+            params['Description'] = kwargs['description']
+
         data.append(query(params, return_root=True))
 
+    return data
+
+
+def describe_snapshots(kwargs=None, call=None):
+    filter_count = 0
+
+    params = {'Action': 'DescribeSnapshots'}
+
+    if 'description' in kwargs:
+        description = kwargs['description']
+        filter_count += 1
+        params['Filter.{0}.Name'.format(filter_count)] = 'description'
+        params['Filter.{0}.Value.1'.format(filter_count)] = description
+
+    data = query(params, return_root=True)
     return data
 
 
@@ -2380,6 +2397,31 @@ def describe_elb_instance_health(kwargs=None, call=None):
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
+
+
+def describe_elb(kwargs=None, call=None):
+    '''
+    Returns detailed configuration information for the load balancer
+    '''
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The describe_elb action must be called with -f or --function.'
+        )
+
+    if not kwargs:
+        kwargs = {}
+
+    if not 'lb-name' in kwargs:
+        log.error('You must specify lb-name to describe.')
+        return False
+
+    params = {'Action': 'DescribeLoadBalancers',
+              'LoadBalancerNames.member.1': kwargs['lb-name']
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
 
 
 def configure_elb_healthcheck(kwargs=None, call=None):
@@ -2932,11 +2974,15 @@ def create_cluster(kwargs=None, call=None):
     if 'public-access' in kwargs:
         params['PubliclyAccessible'] = kwargs['public-access']
 
+    if 'encrypted' in kwargs:
+        params['Encrypted'] = kwargs['encrypted']
+
     # this is pretty naive, just one securitygroup for now
     if 'vpc-securitygroup' in kwargs:
         params['VpcSecurityGroupIds.member.1'] = kwargs['vpc-securitygroup']
 
     data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
 
 def list_certificates(kwargs=None, call=None):
     '''
