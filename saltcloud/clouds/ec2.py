@@ -2083,9 +2083,6 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
     data = query(params, return_root=True)
     return data
 
-def list_snapshots(location=None):
-    pass
-
 def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     '''
     Create a snapshot of a volume or comma-separated list of volumes
