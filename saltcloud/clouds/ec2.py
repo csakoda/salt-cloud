@@ -1154,13 +1154,13 @@ def create_attach_volumes(name, kwargs, call=None):
             volume_dict['volume_id'] = volume['volume_id']
         elif 'snapshot' in volume:
             volume_dict['snapshot'] = volume['snapshot']
-        else:
-            volume_dict['size'] = volume['size']
 
-            if 'type' in volume:
-                volume_dict['type'] = volume['type']
-            if 'iops' in volume:
-                volume_dict['iops'] = volume['iops']
+        if 'size' in volume:
+            volume_dict['size'] = volume['size']
+        if 'type' in volume:
+            volume_dict['type'] = volume['type']
+        if 'iops' in volume:
+            volume_dict['iops'] = volume['iops']
 
         if 'volume_id' not in volume_dict:
             created_volume = create_volume(volume_dict, call='function')
@@ -2083,12 +2083,11 @@ def delete_volume(name=None, kwargs=None, instance_id=None, call=None):
     data = query(params, return_root=True)
     return data
 
-def list_snapshots(location=None):
-    pass
-
 def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
     '''
     Create a snapshot of a volume or comma-separated list of volumes
+
+    If you supply a description, it will be applied to all snapshots.
     '''
     if not kwargs:
         kwargs = {}
@@ -2103,8 +2102,26 @@ def create_snapshot(name=None, kwargs=None, instance_id=None, call=None):
         params = {'Action': 'CreateSnapshot',
                   'VolumeId': vol}
 
+        if 'description' in kwargs:
+            params['Description'] = kwargs['description']
+
         data.append(query(params, return_root=True))
 
+    return data
+
+
+def describe_snapshots(kwargs=None, call=None):
+    filter_count = 0
+
+    params = {'Action': 'DescribeSnapshots'}
+
+    if 'description' in kwargs:
+        description = kwargs['description']
+        filter_count += 1
+        params['Filter.{0}.Name'.format(filter_count)] = 'description'
+        params['Filter.{0}.Value.1'.format(filter_count)] = description
+
+    data = query(params, return_root=True)
     return data
 
 
