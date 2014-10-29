@@ -2357,6 +2357,18 @@ def detach_elb(name, kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
 
+def get_instance_name(kwargs=None, call=None):
+    '''
+    Lookup an instance_id, get the logical name
+    '''
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The get_instance_name function must be called with -f or --function.'
+        )
+    for tag in get_tags(instance_id=kwargs['instance_id'], call='action'):
+        if tag['key'] == 'Name':
+            return tag['value']
+
 def describe_elb_instance_health(kwargs=None, call=None):
     '''
     Describe the instance health of all instances on the Elastic Load Balancer
