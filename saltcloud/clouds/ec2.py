@@ -2996,6 +2996,30 @@ def create_cluster(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def describe_cluster(kwargs=None, call=None):
+    '''
+    Describe Cluster
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'cluster-name' not in kwargs:
+        log.error('{0} must be specified.'.format(req))
+        return False
+
+    params = { 'Action': 'DescribeClusters',
+               'ClusterIdentifier': kwargs['cluster-name'] }
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
+
+
 def list_certificates(kwargs=None, call=None):
     '''
     List all cerficiates on an account
