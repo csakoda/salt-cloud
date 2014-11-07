@@ -2966,7 +2966,7 @@ def create_cluster(kwargs=None, call=None):
     if not kwargs:
         kwargs = {}
 
-    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type' ]:
+    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type', 'paramgroup-name' ]:
         if req not in kwargs:
             log.error('{0} must be specified.'.format(req))
             return False
@@ -2975,7 +2975,8 @@ def create_cluster(kwargs=None, call=None):
                'ClusterIdentifier': kwargs['cluster-name'],
                'MasterUserPassword': kwargs['master-pass'],
                'MasterUsername': kwargs['master-user'],
-               'NodeType': kwargs['node-type'] }
+               'NodeType': kwargs['node-type'],
+               'ParameterGroupName': kwargs['paramgroup-name'] }
 
     if 'subnetgroup-name' in kwargs:
         params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
