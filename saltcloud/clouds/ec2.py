@@ -2976,7 +2976,7 @@ def create_cluster(kwargs=None, call=None):
                'MasterUserPassword': kwargs['master-pass'],
                'MasterUsername': kwargs['master-user'],
                'NodeType': kwargs['node-type'],
-               'ParameterGroupName': kwargs['paramgroup-name'] }
+               'ClusterParameterGroupName': kwargs['paramgroup-name'] }
 
     if 'subnetgroup-name' in kwargs:
         params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
