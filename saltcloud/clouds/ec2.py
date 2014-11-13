@@ -761,7 +761,7 @@ def securitygroupid(vm_):
 
 def _deref_securitygroupname(sg_name, vm_=None):
     vpcid = config.get_config_value(
-        'vpcid', vm_, get_configured_provider()
+        'vpcid', vm_ or get_configured_provider(), __opts__
         )
 
     vpc = describe_vpc({ 'vpc-id': vpcid }, call='function')
