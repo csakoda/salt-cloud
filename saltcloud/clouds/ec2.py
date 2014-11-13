@@ -761,8 +761,9 @@ def securitygroupid(vm_):
 
 def _deref_securitygroupname(sg_name, vm_=None):
     vpcid = config.get_config_value(
-        'vpcid', vm_, __opts__
+        'vpcid', vm_, get_configured_provider()
         )
+
     vpc = describe_vpc({ 'vpc-id': vpcid }, call='function')
     vpcname = _get_vpcname(vpc)
     params = { 'vpc-id': vpcid }
@@ -3078,3 +3079,34 @@ def _parse_str_parameters(params):
     # Parses strings in the format 'a=1,b=2;c=3,d=4' in to a list of dictionaries
     # i.e. [{'a': '1', 'b': '2'}, {'a': '3', 'b': '4'}]
     return [dict(val.split('=') for val in param.split(',')) for param in params.split(';')]
+
+def attach_security_group(name, kwargs, call=None):
+    if call != 'action':
+        log.error(
+            'attach_security_group must be called with -f or --function.'
+        )
+        return False
+
+    instance = _get_node(name)
+
+    if 'group' not in kwargs:
+        log.error('group must be specified')
+        return False
+
+    if not kwargs['group'].startswith('sg-'):
+        new_group = _deref_securitygroupname(kwargs['group'])
+    else:
+        new_group = kwargs['group']
+
+    params = { 'Action': 'ModifyInstanceAttribute',
+               'InstanceId': instance['instanceId'] }
+
+    index = 1
+    for group in instance['groupSet']['item']:
+        params['GroupId.{0}'.format(index)] = group['groupId']
+        index += 1
+
+    params['GroupId.{0}'.format(index)] = new_group
+
+    data = query(params, return_root=True)
+    return data
