@@ -1206,11 +1206,18 @@ def create_attach_volumes(name, kwargs, call=None):
 
             msg = (
                 '{0} attached to {1} (aka {2}) as device {3}'.format(
-                    volume_dict['volume_id'], kwargs['instance_id'], name, volume['device']
+                    volume_dict['volume_id'], kwargs['instance_id'], name,
+                    volume['device']
                 )
             )
             log.info(msg)
             ret.append(msg)
+
+            # should we instead default to del_on_destroy=True?
+            if 'del_on_destroy' in volume and volume['del_on_destroy']:
+                _toggle_delvol(instance_id=kwargs['instance_id'], value=True,
+                               device=volume['device'])
+
             break
         else:
             raise SaltCloudSystemExit(
@@ -1906,37 +1913,40 @@ def delvol_on_destroy(name, call=None):
     return _toggle_delvol(name=name, value='true')
 
 
-def _toggle_delvol(name=None, instance_id=None, value=None, requesturl=None):
+def _toggle_delvol(name=None, instance_id=None, value=None,
+                   requesturl=None, # not sure what is useful about this
+                   device=None):
     '''
-    Disable termination protection on a node
-
-    CLI Example::
-
-        salt-cloud -a disable_term_protect mymachine
+    Toggle deleteOnTermination for a volume
     '''
     if not instance_id:
         instances = list_nodes_full()
         instance_id = instances[name]['instanceId']
 
-    if requesturl:
-        data = query(requesturl=requesturl)
-    else:
-        params = {'Action': 'DescribeInstances',
-                  'InstanceId.1': instance_id}
-        data, requesturl = query(params, return_url=True)
+    if not device:
+        # no device specified, try to look up the root device
+        # will error if more than one device is attached
+        if requesturl:
+            data = query(requesturl=requesturl)
+        else:
+            data = describe_instance(instance_id=instance_id, call='action')
 
-    blockmap = data[0]['instancesSet']['item']['blockDeviceMapping']
-    device_name = blockmap['item']['deviceName']
+        blockmap = data[0]['instancesSet']['item']['blockDeviceMapping']['item']
+        if isinstance(blockmap, dict):
+            device = blockmap['deviceName']
+        else:
+            log.error('Could not toggle root volume, more than one device'
+                      ' attached.  Specify the device you wish to toggle')
+            return
 
     params = {'Action': 'ModifyInstanceAttribute',
               'InstanceId': instance_id,
-              'BlockDeviceMapping.1.DeviceName': device_name,
+              'BlockDeviceMapping.1.DeviceName': device,
               'BlockDeviceMapping.1.Ebs.DeleteOnTermination': value}
 
     query(params, return_root=True)
 
-    return query(requesturl=requesturl)
-
+    return describe_instance(instance_id=instance_id, call='action')
 
 def create_volume(kwargs=None, call=None):
     '''
