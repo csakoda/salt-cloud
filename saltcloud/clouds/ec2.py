@@ -2327,6 +2327,33 @@ def create_elb(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
 
+def destroy_elb(kwargs=None, call=None):
+    '''
+    Destroy an Elastic Load Balancer
+    '''
+    if call != 'function':
+        log.error(
+            'destroy_elb must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'lb-name' not in kwargs:
+        log.error('You must specify an lb-name to destroy')
+        return False
+
+
+        return False
+
+    params = {'Action': 'DeleteLoadBalancer',
+              'LoadBalancerName': kwargs['lb-name']
+              }
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+
 def attach_elb(name, kwargs=None, call=None):
     '''
     Attach and instance to an Elastic Load Balancer
