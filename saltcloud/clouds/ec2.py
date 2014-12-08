@@ -181,6 +181,25 @@ def get_configured_provider():
     )
 
 
+def _require_kwargs(required, kwargs):
+    '''
+    Return False and log an error describing any required fields
+    missing from kwargs.
+
+    Example:
+    if not _require_kwargs(['list', 'of', 'fields'], kwargs):
+        return False
+    '''
+    all_present = True
+
+    for field in required:
+        if field not in kwargs:
+            log.error('{0} is required.'.format(field))
+            all_present = False
+
+    return all_present
+
+
 def _xml_to_dict(xmltree):
     '''
     Convert an XML tree into a dict
@@ -2131,6 +2150,21 @@ def describe_snapshots(kwargs=None, call=None):
         filter_count += 1
         params['Filter.{0}.Name'.format(filter_count)] = 'description'
         params['Filter.{0}.Value.1'.format(filter_count)] = description
+
+    data = query(params, return_root=True)
+    return data
+
+
+def share_snapshot(kwargs=None, call=None):
+    if not kwargs:
+        kwargs = {}
+
+    if not _require_kwargs(['snapshot_id', 'share_to'], kwargs):
+        return False
+
+    params = {'Action': 'ModifySnapshotAttribute',
+              'SnapshotId': kwargs['snapshot_id'],
+              'CreateVolumePermission.Add.1.UserId': kwargs['share_to']}
 
     data = query(params, return_root=True)
     return data
