@@ -181,6 +181,25 @@ def get_configured_provider():
     )
 
 
+def _require_kwargs(required, kwargs):
+    '''
+    Return False and log an error describing any required fields
+    missing from kwargs.
+
+    Example:
+    if not _require_kwargs(['list', 'of', 'fields'], kwargs):
+        return False
+    '''
+    all_present = True
+
+    for field in required:
+        if field not in kwargs:
+            log.error('{0} is required.'.format(field))
+            all_present = False
+
+    return all_present
+
+
 def _xml_to_dict(xmltree):
     '''
     Convert an XML tree into a dict
@@ -761,8 +780,9 @@ def securitygroupid(vm_):
 
 def _deref_securitygroupname(sg_name, vm_=None):
     vpcid = config.get_config_value(
-        'vpcid', vm_, __opts__
+        'vpcid', vm_ or get_configured_provider(), __opts__
         )
+
     vpc = describe_vpc({ 'vpc-id': vpcid }, call='function')
     vpcname = _get_vpcname(vpc)
     params = { 'vpc-id': vpcid }
@@ -1205,11 +1225,18 @@ def create_attach_volumes(name, kwargs, call=None):
 
             msg = (
                 '{0} attached to {1} (aka {2}) as device {3}'.format(
-                    volume_dict['volume_id'], kwargs['instance_id'], name, volume['device']
+                    volume_dict['volume_id'], kwargs['instance_id'], name,
+                    volume['device']
                 )
             )
             log.info(msg)
             ret.append(msg)
+
+            # should we instead default to del_on_destroy=True?
+            if 'del_on_destroy' in volume and volume['del_on_destroy']:
+                _toggle_delvol(instance_id=kwargs['instance_id'], value=True,
+                               device=volume['device'])
+
             break
         else:
             raise SaltCloudSystemExit(
@@ -1905,37 +1932,40 @@ def delvol_on_destroy(name, call=None):
     return _toggle_delvol(name=name, value='true')
 
 
-def _toggle_delvol(name=None, instance_id=None, value=None, requesturl=None):
+def _toggle_delvol(name=None, instance_id=None, value=None,
+                   requesturl=None, # not sure what is useful about this
+                   device=None):
     '''
-    Disable termination protection on a node
-
-    CLI Example::
-
-        salt-cloud -a disable_term_protect mymachine
+    Toggle deleteOnTermination for a volume
     '''
     if not instance_id:
         instances = list_nodes_full()
         instance_id = instances[name]['instanceId']
 
-    if requesturl:
-        data = query(requesturl=requesturl)
-    else:
-        params = {'Action': 'DescribeInstances',
-                  'InstanceId.1': instance_id}
-        data, requesturl = query(params, return_url=True)
+    if not device:
+        # no device specified, try to look up the root device
+        # will error if more than one device is attached
+        if requesturl:
+            data = query(requesturl=requesturl)
+        else:
+            data = describe_instance(instance_id=instance_id, call='action')
 
-    blockmap = data[0]['instancesSet']['item']['blockDeviceMapping']
-    device_name = blockmap['item']['deviceName']
+        blockmap = data[0]['instancesSet']['item']['blockDeviceMapping']['item']
+        if isinstance(blockmap, dict):
+            device = blockmap['deviceName']
+        else:
+            log.error('Could not toggle root volume, more than one device'
+                      ' attached.  Specify the device you wish to toggle')
+            return
 
     params = {'Action': 'ModifyInstanceAttribute',
               'InstanceId': instance_id,
-              'BlockDeviceMapping.1.DeviceName': device_name,
+              'BlockDeviceMapping.1.DeviceName': device,
               'BlockDeviceMapping.1.Ebs.DeleteOnTermination': value}
 
     query(params, return_root=True)
 
-    return query(requesturl=requesturl)
-
+    return describe_instance(instance_id=instance_id, call='action')
 
 def create_volume(kwargs=None, call=None):
     '''
@@ -2120,6 +2150,21 @@ def describe_snapshots(kwargs=None, call=None):
         filter_count += 1
         params['Filter.{0}.Name'.format(filter_count)] = 'description'
         params['Filter.{0}.Value.1'.format(filter_count)] = description
+
+    data = query(params, return_root=True)
+    return data
+
+
+def share_snapshot(kwargs=None, call=None):
+    if not kwargs:
+        kwargs = {}
+
+    if not _require_kwargs(['snapshot_id', 'share_to'], kwargs):
+        return False
+
+    params = {'Action': 'ModifySnapshotAttribute',
+              'SnapshotId': kwargs['snapshot_id'],
+              'CreateVolumePermission.Add.1.UserId': kwargs['share_to']}
 
     data = query(params, return_root=True)
     return data
@@ -2325,6 +2370,33 @@ def create_elb(kwargs=None, call=None):
 
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
+
+def destroy_elb(kwargs=None, call=None):
+    '''
+    Destroy an Elastic Load Balancer
+    '''
+    if call != 'function':
+        log.error(
+            'destroy_elb must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+
+    if 'lb-name' not in kwargs:
+        log.error('You must specify an lb-name to destroy')
+        return False
+
+
+        return False
+
+    params = {'Action': 'DeleteLoadBalancer',
+              'LoadBalancerName': kwargs['lb-name']
+              }
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
 
 def attach_elb(name, kwargs=None, call=None):
     '''
@@ -2966,7 +3038,7 @@ def create_cluster(kwargs=None, call=None):
     if not kwargs:
         kwargs = {}
 
-    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type' ]:
+    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type', 'paramgroup-name' ]:
         if req not in kwargs:
             log.error('{0} must be specified.'.format(req))
             return False
@@ -2975,7 +3047,8 @@ def create_cluster(kwargs=None, call=None):
                'ClusterIdentifier': kwargs['cluster-name'],
                'MasterUserPassword': kwargs['master-pass'],
                'MasterUsername': kwargs['master-user'],
-               'NodeType': kwargs['node-type'] }
+               'NodeType': kwargs['node-type'],
+               'ClusterParameterGroupName': kwargs['paramgroup-name'] }
 
     if 'subnetgroup-name' in kwargs:
         params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
@@ -3081,3 +3154,34 @@ def _parse_str_parameters(params):
     # Parses strings in the format 'a=1,b=2;c=3,d=4' in to a list of dictionaries
     # i.e. [{'a': '1', 'b': '2'}, {'a': '3', 'b': '4'}]
     return [dict(val.split('=') for val in param.split(',')) for param in params.split(';')]
+
+def attach_security_group(name, kwargs, call=None):
+    if call != 'action':
+        log.error(
+            'attach_security_group must be called with -f or --function.'
+        )
+        return False
+
+    instance = _get_node(name)
+
+    if 'group' not in kwargs:
+        log.error('group must be specified')
+        return False
+
+    if not kwargs['group'].startswith('sg-'):
+        new_group = _deref_securitygroupname(kwargs['group'])
+    else:
+        new_group = kwargs['group']
+
+    params = { 'Action': 'ModifyInstanceAttribute',
+               'InstanceId': instance['instanceId'] }
+
+    index = 1
+    for group in instance['groupSet']['item']:
+        params['GroupId.{0}'.format(index)] = group['groupId']
+        index += 1
+
+    params['GroupId.{0}'.format(index)] = new_group
+
+    data = query(params, return_root=True)
+    return data
