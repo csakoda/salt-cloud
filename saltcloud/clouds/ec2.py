@@ -2989,6 +2989,9 @@ def create_cluster(kwargs=None, call=None):
     if 'encrypted' in kwargs:
         params['Encrypted'] = kwargs['encrypted']
 
+    if 'number-of-nodes' in kwargs:
+        params['NumberOfNodes'] = kwargs['number-of-nodes']
+
     # this is pretty naive, just one securitygroup for now
     if 'vpc-securitygroup' in kwargs:
         params['VpcSecurityGroupIds.member.1'] = kwargs['vpc-securitygroup']
