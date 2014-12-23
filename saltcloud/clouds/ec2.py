@@ -2334,11 +2334,25 @@ def create_elb(kwargs=None, call=None):
         else:
             log.error('instance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
             return False
-        if 'cert-name' in listener:
-            cert_id = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == listener['cert-name'] ][0]
+        # Certificates, either by id, name, or a lookup in kwargs.
+        cert_name = None
+        cert_id = None
+        if 'cert-lookup' in listener:
+            cert_tag = listener['cert-lookup']
+            cert_name = kwargs[cert_tag]
+        elif 'cert-name' in listener:
+            cert_name = listener['cert-name']
+        elif 'cert-id' in listener:
+            cert_id = listener['cert-id']
+        if cert_name:
+            log.info('certificate name is {0}'.format(cert_name))
+            cert_list = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == cert_name ]
+            if not cert_list:
+                log.error('certificate "{0}" was not found'.format(cert_name))
+                return False
+            cert_id = cert_list[0]
+        if cert_id:
             params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = cert_id
-        if 'cert-id' in listener:
-            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
     # Subnets and Security groups only required for VPC?
 
     # SecurityGroups
@@ -3112,7 +3126,10 @@ def list_certificates(kwargs=None, call=None):
     params = { 'Action': 'ListServerCertificates' }
 
     data = query(params, return_root=True, endpoint_provider='iam')
-    return data[0]['ServerCertificateMetadataList']['member']
+    list_result = data[0]['ServerCertificateMetadataList']['member']
+    if isinstance(list_result, dict):
+        list_result = [list_result]
+    return list_result
 
 def _parse_ip_permissions(kwargs = None, params = None):
     if not isinstance(kwargs, dict) or not isinstance(params, dict):
