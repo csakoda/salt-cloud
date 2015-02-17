@@ -258,7 +258,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         # copy the params in case the same instance of params is queries many times
         params = params.copy()
 
-        params['Version'] = '2012-06-01'
+        params['Version'] = '2014-10-01'
         params['SignatureVersion'] = '2'
 
         if endpoint_provider == 'ec2':
@@ -271,6 +271,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
                 'elb_endpoint',
                 'elasticloadbalancing.{0}.{1}'.format(location, service_url)
             )
+            params['Version'] = '2012-06-01'
         elif endpoint_provider == 'redshift':
             endpoint = provider.get(
                 'redshift_endpoint',
@@ -896,11 +897,35 @@ def create(vm_=None, call=None):
     if root_vol_size is not None:
         if not isinstance(root_vol_size, int):
             raise SaltCloudConfigError(
-                '\'root_vol_size\' should be a integer value.'
+                '\'root_vol_size\' should be an integer value.'
             )
 
         params['BlockDeviceMapping.1.DeviceName'] = '/dev/sda1'
         params['BlockDeviceMapping.1.Ebs.VolumeSize'] = str(root_vol_size)
+
+    root_vol_type = config.get_config_value(
+        'root_vol_type', vm_, __opts__, search_global=False
+    )
+
+    if root_vol_type is not None:
+
+        params['BlockDeviceMapping.1.DeviceName'] = '/dev/sda1'
+        params['BlockDeviceMapping.1.Ebs.VolumeType'] = root_vol_type
+
+        if root_vol_type == 'io1':
+            root_iops = config.get_config_value(
+                'root_iops', vm_, __opts__, search_global=False
+            )
+            if root_iops is None:
+                raise SaltCloudConfigError(
+                    '\'root_vol_type\' \'{0}\' requires the \'root_iops\' property.'.format(root_vol_type)
+                )
+            elif not isinstance(root_iops, int):
+                raise SaltCloudConfigError(
+                    '\'root_iops\' should be an integer value.'
+                )
+            else:
+                params['BlockDeviceMapping.1.Ebs.Iops'] = str(root_iops)
 
     # Get ANY defined volumes settings, merging data, in the following order
     # 1. VM config
