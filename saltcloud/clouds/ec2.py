@@ -3064,6 +3064,32 @@ def create_cluster_subnet_group(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def describe_cluster_subnet_groups(kwargs=None, call=None):
+    '''
+    Describe Cluster Subnet Groups
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+    params = { 'Action': 'DescribeClusterSubnetGroups' }
+
+    if 'subnetgroup-name' in kwargs:
+        params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
+
+    if 'max-records' in kwargs:
+        params['MaxRecords'] = kwargs['max-records']
+
+    if 'marker' in kwargs:
+        params['Marker'] = kwargs['marker']
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
+
 def create_cluster(kwargs=None, call=None):
     '''
     Create a new Cluster
