@@ -3172,7 +3172,7 @@ def enable_logging(kwargs=None, call=None):
             log.error('{0} must be specified.'.format(req))
             return False
 
-    params = { 'Action': 'EnableLoggin',
+    params = { 'Action': 'EnableLogging',
                'ClusterIdentifier': kwargs['cluster-name'],
                'BucketName': kwargs['bucket-name'],
                'S3KeyPrefix': kwargs['s3-key-prefix']
