@@ -3134,6 +3134,26 @@ def describe_cluster(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def enable_logging(kwargs=None, call=None):
+    '''
+    Enable Audit Logging
+    '''
+    if not kwargs:
+        kwargs = {}
+
+    for req in [ 'cluster-name', 'bucket-name', 's3-key-prefix' ]:
+        if req not in kwargs:
+            log.error('{0} must be specified.'.format(req))
+            return False
+
+    params = { 'Action': 'EnableLoggin',
+               'ClusterIdentifier': kwargs['cluster-name'],
+               'BucketName': kwargs['bucket-name'],
+               'S3KeyPrefix': kwargs['s3-key-prefix']
+               }
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
 
 def list_certificates(kwargs=None, call=None):
     '''
