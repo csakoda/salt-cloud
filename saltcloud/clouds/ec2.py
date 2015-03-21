@@ -3064,6 +3064,32 @@ def create_cluster_subnet_group(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def describe_cluster_subnet_groups(kwargs=None, call=None):
+    '''
+    Describe Cluster Subnet Groups
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+    params = { 'Action': 'DescribeClusterSubnetGroups' }
+
+    if 'subnetgroup-name' in kwargs:
+        params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
+
+    if 'max-records' in kwargs:
+        params['MaxRecords'] = kwargs['max-records']
+
+    if 'marker' in kwargs:
+        params['Marker'] = kwargs['marker']
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
+
 def create_cluster(kwargs=None, call=None):
     '''
     Create a new Cluster
@@ -3134,6 +3160,26 @@ def describe_cluster(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def enable_logging(kwargs=None, call=None):
+    '''
+    Enable Audit Logging
+    '''
+    if not kwargs:
+        kwargs = {}
+
+    for req in [ 'cluster-name', 'bucket-name', 's3-key-prefix' ]:
+        if req not in kwargs:
+            log.error('{0} must be specified.'.format(req))
+            return False
+
+    params = { 'Action': 'EnableLogging',
+               'ClusterIdentifier': kwargs['cluster-name'],
+               'BucketName': kwargs['bucket-name'],
+               'S3KeyPrefix': kwargs['s3-key-prefix']
+               }
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
 
 def list_certificates(kwargs=None, call=None):
     '''
