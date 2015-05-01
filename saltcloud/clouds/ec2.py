@@ -1257,8 +1257,13 @@ def create_attach_volumes(name, kwargs, call=None):
             log.info(msg)
             ret.append(msg)
 
-            # should we instead default to del_on_destroy=True?
-            if 'del_on_destroy' in volume and volume['del_on_destroy']:
+            # Defaulting delvol_on_destroy to True
+            if 'delvol_on_destroy' in volume:
+                delete_volume_on_destroy = volume['delvol_on_destroy']
+            else:
+                delete_volume_on_destroy = True
+
+            if delete_volume_on_destroy:
                 _toggle_delvol(instance_id=kwargs['instance_id'], value=True,
                                device=volume['device'])
 
