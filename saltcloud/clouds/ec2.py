@@ -181,6 +181,25 @@ def get_configured_provider():
     )
 
 
+def _require_kwargs(required, kwargs):
+    '''
+    Return False and log an error describing any required fields
+    missing from kwargs.
+
+    Example:
+    if not _require_kwargs(['list', 'of', 'fields'], kwargs):
+        return False
+    '''
+    all_present = True
+
+    for field in required:
+        if field not in kwargs:
+            log.error('{0} is required.'.format(field))
+            all_present = False
+
+    return all_present
+
+
 def _xml_to_dict(xmltree):
     '''
     Convert an XML tree into a dict
@@ -239,7 +258,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
         # copy the params in case the same instance of params is queries many times
         params = params.copy()
 
-        params['Version'] = '2012-06-01'
+        params['Version'] = '2014-10-01'
         params['SignatureVersion'] = '2'
 
         if endpoint_provider == 'ec2':
@@ -252,6 +271,7 @@ def query(params=None, setname=None, requesturl=None, location=None,
                 'elb_endpoint',
                 'elasticloadbalancing.{0}.{1}'.format(location, service_url)
             )
+            params['Version'] = '2012-06-01'
         elif endpoint_provider == 'redshift':
             endpoint = provider.get(
                 'redshift_endpoint',
@@ -877,11 +897,35 @@ def create(vm_=None, call=None):
     if root_vol_size is not None:
         if not isinstance(root_vol_size, int):
             raise SaltCloudConfigError(
-                '\'root_vol_size\' should be a integer value.'
+                '\'root_vol_size\' should be an integer value.'
             )
 
         params['BlockDeviceMapping.1.DeviceName'] = '/dev/sda1'
         params['BlockDeviceMapping.1.Ebs.VolumeSize'] = str(root_vol_size)
+
+    root_vol_type = config.get_config_value(
+        'root_vol_type', vm_, __opts__, search_global=False
+    )
+
+    if root_vol_type is not None:
+
+        params['BlockDeviceMapping.1.DeviceName'] = '/dev/sda1'
+        params['BlockDeviceMapping.1.Ebs.VolumeType'] = root_vol_type
+
+        if root_vol_type == 'io1':
+            root_iops = config.get_config_value(
+                'root_iops', vm_, __opts__, search_global=False
+            )
+            if root_iops is None:
+                raise SaltCloudConfigError(
+                    '\'root_vol_type\' \'{0}\' requires the \'root_iops\' property.'.format(root_vol_type)
+                )
+            elif not isinstance(root_iops, int):
+                raise SaltCloudConfigError(
+                    '\'root_iops\' should be an integer value.'
+                )
+            else:
+                params['BlockDeviceMapping.1.Ebs.Iops'] = str(root_iops)
 
     # Get ANY defined volumes settings, merging data, in the following order
     # 1. VM config
@@ -1213,8 +1257,13 @@ def create_attach_volumes(name, kwargs, call=None):
             log.info(msg)
             ret.append(msg)
 
-            # should we instead default to del_on_destroy=True?
-            if 'del_on_destroy' in volume and volume['del_on_destroy']:
+            # Defaulting delvol_on_destroy to True
+            if 'delvol_on_destroy' in volume:
+                delete_volume_on_destroy = volume['delvol_on_destroy']
+            else:
+                delete_volume_on_destroy = True
+
+            if delete_volume_on_destroy:
                 _toggle_delvol(instance_id=kwargs['instance_id'], value=True,
                                device=volume['device'])
 
@@ -2136,6 +2185,21 @@ def describe_snapshots(kwargs=None, call=None):
     return data
 
 
+def share_snapshot(kwargs=None, call=None):
+    if not kwargs:
+        kwargs = {}
+
+    if not _require_kwargs(['snapshot_id', 'share_to'], kwargs):
+        return False
+
+    params = {'Action': 'ModifySnapshotAttribute',
+              'SnapshotId': kwargs['snapshot_id'],
+              'CreateVolumePermission.Add.1.UserId': kwargs['share_to']}
+
+    data = query(params, return_root=True)
+    return data
+
+
 def get_block_device_mapping(name=None, kwargs=None, instance_id=None,
                              call=None):
     '''
@@ -2300,11 +2364,25 @@ def create_elb(kwargs=None, call=None):
         else:
             log.error('instance-port, lb-port are required parameters.  Additionally you must specify either protocol or both instance-protocol and lb-protocol')
             return False
-        if 'cert-name' in listener:
-            cert_id = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == listener['cert-name'] ][0]
+        # Certificates, either by id, name, or a lookup in kwargs.
+        cert_name = None
+        cert_id = None
+        if 'cert-lookup' in listener:
+            cert_tag = listener['cert-lookup']
+            cert_name = kwargs[cert_tag]
+        elif 'cert-name' in listener:
+            cert_name = listener['cert-name']
+        elif 'cert-id' in listener:
+            cert_id = listener['cert-id']
+        if cert_name:
+            log.info('certificate name is {0}'.format(cert_name))
+            cert_list = [ cert['Arn'] for cert in list_certificates(call='function') if cert['ServerCertificateName'] == cert_name ]
+            if not cert_list:
+                log.error('certificate "{0}" was not found'.format(cert_name))
+                return False
+            cert_id = cert_list[0]
+        if cert_id:
             params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = cert_id
-        if 'cert-id' in listener:
-            params['Listeners.member.{0}.SSLCertificateId'.format(index+1)] = listener['cert-id']
     # Subnets and Security groups only required for VPC?
 
     # SecurityGroups
@@ -2991,6 +3069,32 @@ def create_cluster_subnet_group(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def describe_cluster_subnet_groups(kwargs=None, call=None):
+    '''
+    Describe Cluster Subnet Groups
+    '''
+    if call != 'function':
+        log.error(
+            'The create_cluster function must be called with -f or --function.'
+        )
+        return False
+
+    if not kwargs:
+        kwargs = {}
+    params = { 'Action': 'DescribeClusterSubnetGroups' }
+
+    if 'subnetgroup-name' in kwargs:
+        params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
+
+    if 'max-records' in kwargs:
+        params['MaxRecords'] = kwargs['max-records']
+
+    if 'marker' in kwargs:
+        params['Marker'] = kwargs['marker']
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
+
 def create_cluster(kwargs=None, call=None):
     '''
     Create a new Cluster
@@ -3004,7 +3108,7 @@ def create_cluster(kwargs=None, call=None):
     if not kwargs:
         kwargs = {}
 
-    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type' ]:
+    for req in [ 'cluster-name', 'master-user', 'master-pass', 'node-type', 'paramgroup-name' ]:
         if req not in kwargs:
             log.error('{0} must be specified.'.format(req))
             return False
@@ -3013,7 +3117,8 @@ def create_cluster(kwargs=None, call=None):
                'ClusterIdentifier': kwargs['cluster-name'],
                'MasterUserPassword': kwargs['master-pass'],
                'MasterUsername': kwargs['master-user'],
-               'NodeType': kwargs['node-type'] }
+               'NodeType': kwargs['node-type'],
+               'ClusterParameterGroupName': kwargs['paramgroup-name'] }
 
     if 'subnetgroup-name' in kwargs:
         params['ClusterSubnetGroupName'] = kwargs['subnetgroup-name']
@@ -3026,6 +3131,9 @@ def create_cluster(kwargs=None, call=None):
 
     if 'encrypted' in kwargs:
         params['Encrypted'] = kwargs['encrypted']
+
+    if 'number-of-nodes' in kwargs:
+        params['NumberOfNodes'] = kwargs['number-of-nodes']
 
     # this is pretty naive, just one securitygroup for now
     if 'vpc-securitygroup' in kwargs:
@@ -3057,6 +3165,26 @@ def describe_cluster(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='redshift')
     return data
 
+def enable_logging(kwargs=None, call=None):
+    '''
+    Enable Audit Logging
+    '''
+    if not kwargs:
+        kwargs = {}
+
+    for req in [ 'cluster-name', 'bucket-name', 's3-key-prefix' ]:
+        if req not in kwargs:
+            log.error('{0} must be specified.'.format(req))
+            return False
+
+    params = { 'Action': 'EnableLogging',
+               'ClusterIdentifier': kwargs['cluster-name'],
+               'BucketName': kwargs['bucket-name'],
+               'S3KeyPrefix': kwargs['s3-key-prefix']
+               }
+
+    data = query(params, return_root=True, endpoint_provider='redshift')
+    return data
 
 def list_certificates(kwargs=None, call=None):
     '''
@@ -3074,7 +3202,10 @@ def list_certificates(kwargs=None, call=None):
     params = { 'Action': 'ListServerCertificates' }
 
     data = query(params, return_root=True, endpoint_provider='iam')
-    return data[0]['ServerCertificateMetadataList']['member']
+    list_result = data[0]['ServerCertificateMetadataList']['member']
+    if isinstance(list_result, dict):
+        list_result = [list_result]
+    return list_result
 
 def _parse_ip_permissions(kwargs = None, params = None):
     if not isinstance(kwargs, dict) or not isinstance(params, dict):
