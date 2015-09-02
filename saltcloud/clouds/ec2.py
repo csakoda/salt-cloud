@@ -2551,6 +2551,21 @@ def describe_elb(kwargs=None, call=None):
     return data
 
 
+def describe_all_elbs(kwargs=None, call=None):
+    '''
+    Return detailed configuration information for all load balancers.
+    '''
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The describe_all_elbs action must be called with -f or '
+            '--function.'
+        )
+
+    params = {'Action': 'DescribeLoadBalancers'}
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
 
 def configure_elb_healthcheck(kwargs=None, call=None):
     '''
