@@ -2664,6 +2664,34 @@ def create_elb_listener(kwargs=None, call=None):
     return data
 
 
+def delete_elb_listener(kwargs=None, call=None):
+    '''
+    Delete a listener from a load balancer.
+    '''
+    if call != 'function':
+        log.error(
+            'The delete_elb_listener function must be called with -f or '
+            '--function.'
+        )
+        return False
+
+    if 'lb-name' not in kwargs:
+        log.error('You must specify an lb-protocol.')
+        return False
+
+    if 'lb-port' not in kwargs:
+        log.error('You must specify an lb-port.')
+        return False
+
+    params = {'Action': 'DeleteLoadBalancerListeners',
+              'LoadBalancerName': kwargs['lb-name'],
+              'LoadBalancerPorts.member.1': kwargs['lb-port']
+              }
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+
 def create_vpc(kwargs=None, call=None):
     '''
     Create a Virtual Private Cloud
