@@ -2616,6 +2616,54 @@ def configure_elb_healthcheck(kwargs=None, call=None):
     data = query(params, return_root=True, endpoint_provider='elb')
     return data
 
+
+def create_elb_listener(kwargs=None, call=None):
+    '''
+    Create a new listener on a load balancer.
+    '''
+    if call != 'function':
+        log.error(
+            'The create_elb_listener function must be called with -f or '
+            '--function.'
+            )
+        return False
+
+    if 'lb-name' not in kwargs:
+        log.error('You must specify an lb-name.')
+        return False
+
+    if 'instance-port' not in kwargs:
+        log.error('You must specify an instance-port.')
+        return False
+
+    if 'lb-port' not in kwargs:
+        log.error('You must specify an lb-port.')
+        return False
+
+    if 'lb-protocol' not in kwargs:
+        log.error('You must specify an lb-protocol.')
+        return False
+
+    params = {'Action': 'CreateLoadBalancerListeners',
+              'LoadBalancerName': kwargs['lb-name'],
+              'Listeners.member.1.InstancePort': kwargs['instance-port'],
+              'Listeners.member.1.LoadBalancerPort': kwargs['lb-port'],
+              'Listeners.member.1.Protocol': kwargs['lb-protocol']
+              }
+
+    # Optional parameters:
+    if 'instance-protocol' in kwargs:
+        params['Listeners.member.1.InstanceProtocol'] = (
+            kwargs['instance-protocol']
+        )
+
+    if 'cert-id' in kwargs:
+        params['Listeners.member.1.SSLCertificateId'] = kwargs['cert-id']
+
+    data = query(params, return_root=True, endpoint_provider='elb')
+    return data
+
+
 def create_vpc(kwargs=None, call=None):
     '''
     Create a Virtual Private Cloud
