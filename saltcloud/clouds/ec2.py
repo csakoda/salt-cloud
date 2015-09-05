@@ -863,6 +863,9 @@ def create(vm_=None, call=None):
     if az_ is not None:
         params['Placement.AvailabilityZone'] = az_
 
+    if 'dedicated' in vm_ and vm_['dedicated']:
+        params['Placement.Tenancy'] = 'dedicated'
+
     subnetid_ = get_subnetid(vm_)
     if subnetid_ is not None:
         params['SubnetId'] = subnetid_
