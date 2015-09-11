@@ -863,6 +863,9 @@ def create(vm_=None, call=None):
     if az_ is not None:
         params['Placement.AvailabilityZone'] = az_
 
+    if 'dedicated' in vm_ and vm_['dedicated']:
+        params['Placement.Tenancy'] = 'dedicated'
+
     subnetid_ = get_subnetid(vm_)
     if subnetid_ is not None:
         params['SubnetId'] = subnetid_
@@ -1206,6 +1209,8 @@ def create_attach_volumes(name, kwargs, call=None):
             volume_dict['type'] = volume['type']
         if 'iops' in volume:
             volume_dict['iops'] = volume['iops']
+        if 'encrypted' in volume:
+            volume_dict['encrypted'] = volume['encrypted']
 
         if 'volume_id' not in volume_dict:
             created_volume = create_volume(volume_dict, call='function')
@@ -2029,6 +2034,9 @@ def create_volume(kwargs=None, call=None):
 
     if 'iops' in kwargs and kwargs.get('type', 'standard') == 'io1':
         params['Iops'] = kwargs['iops']
+
+    if 'encrypted' in kwargs and kwargs['encrypted']:
+        params['Encrypted'] = True
 
     log.debug(params)
 
